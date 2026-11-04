@@ -111,7 +111,9 @@ export function rankCandidates(items, query, aliases, opts) {
     // ④ 中文最长公共子串：别名抽词没有分词，会切出「写简」「做高」这种碎片。
     //    直接比连续子串，能把「改简历」对到包含「简历」的描述上，不依赖词表质量。
     if (hasCJK.test(q)) {
-      const lcs = longestCommonSubstring(q, normalize(String(it.desc || '')));
+      // index.json 用 desc，宿主候选用 description —— 两个都要认
+      const descText = normalize(String(it.description || it.desc || ''));
+      const lcs = longestCommonSubstring(q, descText);
       if (lcs >= 2) {
         const s = 60 + lcs * 14; // 2 字=88，3 字=102，4 字=116
         if (s > best) best = s;
