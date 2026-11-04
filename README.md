@@ -4,6 +4,18 @@
 
 > English: the `/` slash menu in DeepSeek Harness lists every installed skill flat. This plugin regroups it into 10 display classes, gives each skill Chinese lookup words, shows counts in a breadcrumb bar, and adds an offline semantic fallback for queries no keyword table covers. It works on the user's own skill library — nothing is pre-baked, you generate the index locally.
 
+[![verify](https://github.com/AByteRookie/dsh-skill-categories/actions/workflows/verify.yml/badge.svg)](https://github.com/AByteRookie/dsh-skill-categories/actions/workflows/verify.yml)
+
+## 安装
+
+```
+git clone https://github.com/AByteRookie/dsh-skill-categories.git
+cd dsh-skill-categories
+install.cmd
+```
+
+自带 Node 探测（PATH 或 DSH 运行时），装完自动重启。打开 `/` 即是分类菜单。
+
 **状态**：在 DSH `0.2.1-rc.5` / Windows 上验证过。macOS 与 Linux 未实测（脚本已尽量跨平台）。
 
 ---
@@ -70,7 +82,7 @@ install.cmd -NoRestart
 ### 手动安装
 
 ```bash
-git clone <repo> dsh-skill-categories
+git clone https://github.com/AByteRookie/dsh-skill-categories.git
 cd dsh-skill-categories
 node setup.mjs
 ```
