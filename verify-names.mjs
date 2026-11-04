@@ -16,6 +16,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
 
 const idx = readJson(join(HERE, 'index.json'));
+
+// 与 verify-client 同理：断言绑定开发者技能库里的具体技能名。
+const REF_MARK = ['gsap-core', 'tdd', 'code-review'];
+if (!REF_MARK.some((n) => idx.skills.some((s) => s.name === n))) {
+  console.log('\nSKIP: 当前 index.json 不含基准数据集，名称覆盖断言不适用');
+  process.exit(0);
+}
+
 const aliases = readJson(join(HERE, 'aliases.json'));
 const curated = readJson(join(HERE, 'curated.json'));
 const skills = idx.skills.filter((s) => s.userInvocable);

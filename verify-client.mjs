@@ -26,7 +26,22 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLIENT = join(homedir(), '.dsh', 'local-plugins', 'dsh-skill-categories', 'lib', 'client.js');
+
+// 这份用例的断言建立在「开发者本机技能库」的数据分布上（152 条 / 148 可见）。
+// 别人 clone 下来跑时数据不同，不能因此判红 —— 但必须显式声明跳过，不能装作通过。
+const REF_MARK = ['gsap-core', 'tdd', 'code-review'];
+function skipIfNoReferenceDataset(loaded) {
+  const names = new Set((loaded.skills || []).map((s) => s.name));
+  if (REF_MARK.some((n) => names.has(n))) return false;
+  console.log('\nSKIP: 当前 index.json 不含基准数据集（开发者的技能库）');
+  console.log('      这份用例校验的是分类/排序在特定数据分布下的行为；');
+  console.log('      你的技能库不同，断言 148 条、设计 23 类这类期望不适用。');
+  console.log('      安装本身不受影响：node setup.mjs 已成功即为可用。');
+  return true;
+}
+
 const idx = JSON.parse(readFileSync(join(HERE, 'index.json'), 'utf8').replace(/^\uFEFF/, ''));
+if (skipIfNoReferenceDataset(idx)) process.exit(0);
 
 const labelOf = new Map(idx.taxonomy.map((t) => [t.id, `${t.glyph} ${t.label}`]));
 const orderOf = new Map(idx.taxonomy.map((t) => [t.id, t.order]));

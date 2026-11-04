@@ -31,6 +31,7 @@ const summary = [];
 for (const [name, file] of SUITES) {
   const r = spawnSync(process.execPath, [join(HERE, file)], { encoding: 'utf8', timeout: 180000 });
   const out = (r.stdout || '') + (r.stderr || '');
+  const skipped = /^SKIP:/m.test(out);
   const line =
     (out.match(/断言：\d+ 通过 \/ \d+ 失败/) ||
       out.match(/方案 A[^\n]*/) ||
@@ -38,8 +39,8 @@ for (const [name, file] of SUITES) {
       out.match(/宿主结果：\d+ 通过 \/ \d+ 失败/) || [''])[0];
   const good = r.status === 0;
   if (!good) failed++;
-  summary.push({ name, code: r.status, line: line.trim() });
-  console.log(`  ${good ? '✓' : '✗'} ${name.padEnd(6)} ${line.trim()}`);
+  summary.push({ name, code: r.status, line: line.trim(), skipped });
+  console.log(`  ${good ? (skipped ? '○' : '✓') : '✗'} ${name.padEnd(6)} ${skipped ? '跳过（本机数据不适用）' : line.trim()}`);
   if (!good) {
     console.log('    ── 失败输出（尾部）──');
     console.log(out.split(/\r?\n/).slice(-20).join('\n'));
@@ -47,7 +48,9 @@ for (const [name, file] of SUITES) {
 }
 
 console.log('\n' + '-'.repeat(52));
-for (const s of summary) console.log(`  ${s.name.padEnd(6)} exit=${s.code}  ${s.line}`);
+for (const s of summary) {
+  console.log(`  ${s.name.padEnd(6)} exit=${s.code}  ${s.skipped ? 'SKIP' : s.line}`);
+}
 console.log('-'.repeat(52));
 console.log(failed ? `发行验收未通过：${failed} 组失败` : '发行验收全部通过');
 process.exit(failed ? 1 : 0);

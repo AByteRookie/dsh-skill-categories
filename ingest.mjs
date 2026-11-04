@@ -11,11 +11,13 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { skillsRoot } from './paths.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, 'inventory.json');
-const USER_ROOT = join(homedir(), '.agents', 'skills');
+// 技能根走公共解析：尊重 AGENTS_SKILLS_DIR 与环境差异，
+// 不能在这里写死 homedir()，否则自定义安装位置、CI 与测试环境都会失效。
+const USER_ROOT = skillsRoot();
 const BUNDLED = join(HERE, 'bundled.json');
 
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
