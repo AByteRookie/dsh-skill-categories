@@ -1,0 +1,29 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  taxonomy:
+    name: taxonomy (${{ matrix.os }} / node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 只跑不依赖本地数据的那一份：分类规则 + 结构约束。
+      # verify-client / verify-names / verify-query 需要 index.json（本地生成），
+      # CI 上没有 DSH 也没有技能库，跑不了。
+      - name: Classification rules
+        run: node verify-taxonomy.mjs

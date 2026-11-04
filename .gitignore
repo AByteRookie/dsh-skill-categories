@@ -1,0 +1,25 @@
+# 生成物：每个人的技能库不同，这些必须本地生成，不进仓库
+bundled.json
+inventory.json
+index.json
+aliases.json
+curated.json
+overrides.json
+taxonomy.local.json
+
+# 运行时产物
+*.log
+restart.lock
+dist/
+node_modules/
+
+# 调试
+probe-ps.mjs
+probe-*.mjs
+*.tmp
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

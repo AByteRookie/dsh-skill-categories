@@ -1,0 +1,35 @@
+{
+  "name": "dsh-skill-categories",
+  "version": "1.0.5",
+  "description": "Give DeepSeek Harness's / menu a real information architecture: 10 display classes, Chinese entry words, breadcrumb counts, category jump, and a local semantic fallback.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "skill",
+    "categorization",
+    "slash-menu",
+    "plugin"
+  ],
+  "scripts": {
+    "setup": "node setup.mjs",
+    "doctor": "node doctor.mjs",
+    "build": "node build.mjs",
+    "pack": "node pack.mjs",
+    "install-plugin": "node install.mjs",
+    "rollback": "node rollback.mjs",
+    "promote": "node promote.mjs",
+    "test": "node verify-taxonomy.mjs && node verify-client.mjs && node verify-names.mjs && node verify-query.mjs",
+    "test:taxonomy": "node verify-taxonomy.mjs"
+  },
+  "files": [
+    "*.mjs",
+    "README.md",
+    "LICENSE"
+  ]
+}
