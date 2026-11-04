@@ -103,7 +103,7 @@ node doctor.mjs                 # 装不上时先跑这个
 node setup.mjs --profile web    # 指定 profile
 node setup.mjs --asar <path>    # 指定 app.asar（自动发现失败时）
 node rollback.mjs               # 从 profile 里摘掉
-npm test                        # 分类器 + 客户端 + 检索 全部断言
+npm test                        # 七组完整验收（见下）
 ```
 
 ## 它到底改了什么
@@ -245,6 +245,22 @@ career 求职与职业   review 评审         tools 工具集成
 
 ## 修复记录
 
+### 1.0.8 — 自检可信度
+
+v1.0.7 分发复测指出两点，都属"自检自己不可信"：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 自检可能验到旧安装 | `preflight` 用临时 `DSH_HOME` 生成插件，但 `verify-client` / `verify-host` 硬读 `homedir()/.dsh`，没有采用 `DSH_HOME` | 两者改走 `paths.mjs` 的 `pluginDir()`，并在输出里打印**实际加载路径 + sha256** |
+| CI 没真正验核心 | 客户端/别名/检索三组依赖作者本人 148 个技能，陌生人环境只会 SKIP，绿色徽章只证明分类规则没坏 | 新增 `verify-fixture.mjs`：用仓库自带的 `fixtures/skills`（16 个固定技能）现场生成索引，再加载这次生成的 bundle，断言分组、计数、同族聚合、五条中文检索、空目录归零 |
+
+`verify-fixture.mjs` 全程数据驱动，不写死任何数字；它会临时覆盖三个生成物，结束时按原字节还原。
+
+验收组从五组扩到七组：
+
+```
+分类体系 49 · 客户端 75 · 别名 14 · 检索 30/30 · 宿主 4 · 安装器 5 · 固定数据集 12
+```
 ### 1.0.7 — GitHub 分发可用性
 
 按「下载 ZIP 能不能装」的方式实测后修的：
@@ -255,7 +271,7 @@ career 求职与职业   review 评审         tools 工具集成
 | Node 版本口径 | package/README 写 ≥20，PowerShell 提示「装 Node 18+」 | 统一 20，并在安装前解析 `node --version` 拦截旧版本 |
 | README 自相矛盾 | 一边说「新技能立刻纳入」，一边说「索引是快照，必须重跑 setup」 | 改成实际行为：分类/分组/计数/描述命中立即生效；别名表与烘焙分类要重跑 setup 才更新 |
 | 文本损坏 | 「要重跑 node setup.mjs」被吃成「要重跑 / ode setup.mjs」 | 修复 |
-| CI 覆盖 | 只跑分类规则，绿徽章不代表能装 | 新增 acceptance job：`setup --skip-asar --no-install` 后跑全部五组 + 安装器组 |
+| CI 覆盖 | 只跑分类规则，绿徽章不代表能装 | 新增 acceptance job：`setup --skip-asar --no-install` 后跑七组（含固定数据集与安装器故障） |
 
 新增 `verify-install.mjs`（5 条）：插件缺失 / 链接失败两种故障下，必须非零退出且 profile 原样。
 `npm test` 也统一成 `verify-all`。
@@ -287,7 +303,7 @@ career 求职与职业   review 评审         tools 工具集成
 |---|---|
 | `pack.mjs` 生成期 lint | 产物若出现「注释吞掉声明」直接抛错，构建阶段拦住（1.0.3 那类回退不可能再发布） |
 | `verify-host.mjs` | 宿主四类场景：正常 / 失效抛错 / 服务缺失 / 删除被监听目录，真实临时目录 + 独立子进程 |
-| `verify-all.mjs` | 五组一起跑：分类体系、客户端、别名、检索、宿主；任一组失败即整体失败 |
+| `verify-all.mjs` | 七组一起跑：分类体系、客户端、别名、检索、宿主、安装器、固定数据集；任一组失败即整体失败 |
 
 ```powershell
 node pack.mjs        # 生成（含产物 lint 门禁）

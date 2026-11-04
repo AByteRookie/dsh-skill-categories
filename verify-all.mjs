@@ -24,6 +24,7 @@ const SUITES = [
   ['检索', 'verify-query.mjs'],
   ['宿主', 'verify-host.mjs'],
   ['安装器', 'verify-install.mjs'],
+  ['固定数据集', 'verify-fixture.mjs'],
 ];
 
 let failed = 0;

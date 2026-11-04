@@ -12,13 +12,22 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { pluginDir } from './paths.mjs';
 
-const HOST = pathToFileURL(
-  join(homedir(), '.dsh', 'local-plugins', 'dsh-skill-categories', 'lib', 'index.js')
-).href;
-void fileURLToPath;
+// 与 verify-client 同源：插件位置走 paths.mjs，尊重 DSH_HOME。
+// 硬读 homedir() 会在 preflight / CI 里验到上一次装的那份。
+const HOST_FILE = join(pluginDir(), 'lib', 'index.js');
+if (!existsSync(HOST_FILE)) {
+  console.error('找不到宿主插件：' + HOST_FILE);
+  console.error('先跑 node setup.mjs（或 pack.mjs）生成插件。');
+  process.exit(2);
+}
+console.log('\n[宿主] 加载 ' + HOST_FILE);
+console.log('  sha256 ' + createHash('sha256').update(readFileSync(HOST_FILE)).digest('hex'));
+const HOST = pathToFileURL(HOST_FILE).href;
 
 let pass = 0;
 let fail = 0;

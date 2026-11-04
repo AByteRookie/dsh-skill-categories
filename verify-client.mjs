@@ -18,14 +18,18 @@
  *   item.section !== undefined && item.section !== prev?.section → 插入标题
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { pluginDir } from './paths.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT = join(homedir(), '.dsh', 'local-plugins', 'dsh-skill-categories', 'lib', 'client.js');
+
+// 插件位置走公共解析（尊重 DSH_HOME）：preflight / CI 会把插件生成到临时目录，
+// 这里若硬读 homedir() 就会验到「上一次装的那份」，等于自欺。
+const CLIENT = join(pluginDir(), 'lib', 'client.js');
 
 // 这份用例的断言建立在「开发者本机技能库」的数据分布上（152 条 / 148 可见）。
 // 别人 clone 下来跑时数据不同，不能因此判红 —— 但必须显式声明跳过，不能装作通过。
@@ -39,6 +43,16 @@ function skipIfNoReferenceDataset(loaded) {
   console.log('      安装本身不受影响：node setup.mjs 已成功即为可用。');
   return true;
 }
+
+// 自检要能证明「验的是哪份文件」：路径 + 哈希都打出来
+if (!existsSync(CLIENT)) {
+  console.error('找不到客户端 bundle：' + CLIENT);
+  console.error('先跑 node setup.mjs（或 pack.mjs）生成插件。');
+  process.exit(2);
+}
+const CLIENT_SHA = createHash('sha256').update(readFileSync(CLIENT)).digest('hex');
+console.log('客户端 bundle: ' + CLIENT);
+console.log('  sha256 ' + CLIENT_SHA);
 
 const idx = JSON.parse(readFileSync(join(HERE, 'index.json'), 'utf8').replace(/^\uFEFF/, ''));
 if (skipIfNoReferenceDataset(idx)) process.exit(0);

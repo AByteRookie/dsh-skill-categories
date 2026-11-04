@@ -1,6 +1,6 @@
 {
   "name": "dsh-skill-categories",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Give DeepSeek Harness's / menu a real information architecture: 10 display classes, Chinese entry words, breadcrumb counts, category jump, and a local semantic fallback.",
   "type": "module",
   "license": "MIT",
