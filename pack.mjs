@@ -450,9 +450,12 @@ ${rankSrc
 			}
 
 			var pinned = {};
+			// 阈值随库大小自适应：技能库小的时候（<60）5 个同族已经很显眼，
+			// 用 5 会把 6 个 unity-* 拆成「3 个成组 + 3 个散进别的类」。
+			var famMin = all.length < 60 ? 3 : FAMILY_MIN;
 			for (var p in known) {
 				if (!Object.prototype.hasOwnProperty.call(known, p)) continue;
-				if (known[p].length < FAMILY_MIN) continue;
+				if (known[p].length < famMin) continue;
 				var fid = 'dyn-' + p.toLowerCase().replace(/[^a-z0-9]+/g, '');
 				if (!CATS[fid]) {
 					CATS[fid] = { order: 900 + Object.keys(CATS).length, label: '✦ ' + p };

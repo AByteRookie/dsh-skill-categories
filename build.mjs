@@ -133,6 +133,62 @@ const classified = inv.skills.map((s) => {
   };
 });
 
+/* ---------------------------- 生态族：构建期整体成组 ---------------------------- */
+
+/**
+ * 一整套引擎/平台技能（unity-* / godot-* / roblox-* …）常常共享前缀。
+ * 逐条规则分类会被 script / build / animation 这类通用词打散到好几个类里，
+ * 用户看到的是一堆碎片而不是一个生态。
+ *
+ * 为什么必须放在构建期：
+ *   每个用户自己的技能都会在 setup 时烘焙进 index.json，
+ *   而运行时的族聚合只对「装进来以后才发现的新技能」生效。
+ *   不做这一步，陌生人装完插件，他的 unity-* 就是散的。
+ *
+ * 判定条件：该前缀成员 ≥ 阈值，且它们本来落在 ≥2 个不同类里（说明规则没有共识）。
+ */
+const FAMILY_MIN_LARGE = 5;
+const FAMILY_MIN_SMALL = 3;
+const famMin = classified.filter((s) => s.userInvocable).length < 60 ? FAMILY_MIN_SMALL : FAMILY_MIN_LARGE;
+
+const famBuckets = new Map();
+for (const s of classified) {
+  if (!s.userInvocable) continue;
+  if (s.tier === 'manual') continue; // 人工指定优先，不参与自动成族
+  const pre = String(s.name).split('-')[0];
+  if (pre.length < 3) continue;
+  if (!famBuckets.has(pre)) famBuckets.set(pre, []);
+  famBuckets.get(pre).push(s);
+}
+
+const dynGroups = [];
+const KNOWN_NAMES = new Set(classified.map((s) => s.name));
+for (const [pre, list] of famBuckets) {
+  if (list.length < famMin) continue;
+  // 前缀本身是个独立技能名（design / deck / web …）→ 这是共用词，不是生态
+  if (KNOWN_NAMES.has(pre)) continue;
+
+  const cats = new Set(list.map((s) => s.category));
+  if (cats.size < 2) continue; // 本来就落在一起，不需要干预
+
+  // 只有当规则对这批技能普遍没把握时才整体成族：
+  // 低置信度（low）或分数不足的成员占多数，说明规则没有共识。
+  const weak = list.filter((s) => s.tier === 'low' || (s.score || 0) < 6);
+  if (weak.length < Math.ceil(list.length * 0.6)) continue;
+
+  const id = 'dyn-' + pre.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  for (const s of list) {
+    s.facet = id;
+    s.category = id;
+    s.tier = 'family';
+    s.reason = `同族聚合（${list.length} 个 ${pre}-*，规则低置信且分散在 ${cats.size} 个类）`;
+  }
+  dynGroups.push({ id, label: '✦ ' + pre, glyph: '✦', order: 900 + dynGroups.length * 10, blurb: `${pre}-* 生态`, facets: [id] });
+}
+if (dynGroups.length) {
+  console.log(`同族聚合：${dynGroups.map((g) => g.label).join('、')}`);
+}
+
 /* ---------------------------- 统计 ---------------------------- */
 
 const visible = classified.filter((s) => s.userInvocable);
@@ -143,7 +199,12 @@ for (const s of visible) {
   byDisplay.get(s.category).push(s);
 }
 
-const orderOf = (id) => (displayMeta.get(id) || MISC_DISPLAY).order;
+const orderOf = (id) => {
+  if (displayMeta.has(id)) return displayMeta.get(id).order;
+  const dyn = dynGroups.find((g) => g.id === id);
+  if (dyn) return dyn.order;
+  return MISC_DISPLAY.order;
+};
 const groups = [...byDisplay.entries()]
   .sort((a, b) => orderOf(a[0]) - orderOf(b[0]))
   .map(([id, items]) => {
@@ -170,7 +231,10 @@ const index = {
   note:
     '旁挂分类索引。category 是 9 个展示类（菜单分组），facet 是 13 个细分面（判定精度）。' +
     '不写入 SKILL.md，因此对 asar 内置技能同样适用，且升级不丢。',
-  taxonomy: ALL_DISPLAY.map(({ id, label, glyph, order, blurb, facets }) => ({ id, label, glyph, order, blurb, facets })),
+  taxonomy: [
+    ...ALL_DISPLAY.map(({ id, label, glyph, order, blurb, facets }) => ({ id, label, glyph, order, blurb, facets })),
+    ...dynGroups,
+  ],
   facets: TAXONOMY.map(({ id, label, glyph, order, blurb }) => ({ id, label, glyph, order, blurb })),
   stats: {
     total: classified.length,
