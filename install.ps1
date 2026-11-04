@@ -69,10 +69,17 @@ if (-not $node) {
 }
 if (-not $node) {
     Say '找不到 Node 运行时' Red
-    Say '安装 Node 18+ 后重试，或确认 DSH 目录完整。' Yellow
+    Say '安装 Node 20 或更高版本后重试，或确认 DSH 目录完整。' Yellow
     exit 1
 }
-Say "Node: $node" Green
+$nodeVer = (& $node --version) -replace '^v',''
+$nodeMajor = [int]($nodeVer.Split('.')[0])
+if ($nodeMajor -lt 20) {
+    Say ("Node $nodeVer 太旧：本插件要求 20 或更高") Red
+    Say '升级 Node 后重试（或让 DSH 自带的运行时参与 PATH）。' Yellow
+    exit 1
+}
+Say "Node: $node (v$nodeVer)" Green
 
 # ── 3. 生成并挂载 ────────────────────────────────────────────
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

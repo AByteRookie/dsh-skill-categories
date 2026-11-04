@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  taxonomy:
-    name: taxonomy (${{ matrix.os }} / node ${{ matrix.node }})
+  # 跨平台、零依赖：只跑纯规则断言，任何机器都能过
+  rules:
+    name: rules (${{ matrix.os }} / node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -17,13 +18,28 @@ jobs:
         node: [20, 22]
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-
-      # 只跑不依赖本地数据的那一份：分类规则 + 结构约束。
-      # verify-client / verify-names / verify-query 需要 index.json（本地生成），
-      # CI 上没有 DSH 也没有技能库，跑不了。
       - name: Classification rules
         run: node verify-taxonomy.mjs
+
+  # 完整验收：真的生成一遍插件，再跑五组检查
+  # 没有 DSH 与个人技能库时，依赖基准数据的用例会显式 SKIP，不算失败
+  acceptance:
+    name: acceptance (ubuntu / node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate plugin from scratch
+        run: node setup.mjs --skip-asar --no-install
+
+      - name: Full acceptance
+        run: node verify-all.mjs
+
+      - name: Installer failure paths
+        run: node verify-install.mjs

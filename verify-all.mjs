@@ -23,6 +23,7 @@ const SUITES = [
   ['别名', 'verify-names.mjs'],
   ['检索', 'verify-query.mjs'],
   ['宿主', 'verify-host.mjs'],
+  ['安装器', 'verify-install.mjs'],
 ];
 
 let failed = 0;
