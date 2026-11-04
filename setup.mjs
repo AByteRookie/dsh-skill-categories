@@ -99,9 +99,13 @@ if (DRY) {
   process.exit(problems.some((p) => p.includes('profile')) ? 1 : 0);
 }
 
-if (!profile) {
+if (!profile && !NO_INSTALL) {
   console.log(c.red('\n无法继续：没有可用 profile。'));
+  console.log(c.dim('  只生成不安装的话可以加 --no-install（CI / 打包场景不需要 profile）。'));
   process.exit(1);
+}
+if (!profile) {
+  console.log(c.yellow('\n没有可用 profile，但指定了 --no-install：只生成，不改任何 profile。'));
 }
 
 /* ---------------------------- 执行 ---------------------------- */
@@ -158,7 +162,12 @@ if (failed.length) {
 }
 
 console.log('\n下一步');
-console.log('  · 重启 DSH（宿主插件只在启动时加载）');
-console.log('  · 之后只改客户端的话，Ctrl+R 重载渲染进程即可');
-console.log('  · 想撤销：node rollback.mjs --profile ' + profile.name);
+if (NO_INSTALL) {
+  console.log('  · 只生成，未挂进任何 profile（--no-install）');
+  console.log('  · 要安装：node install.mjs --profile <name>');
+} else {
+  console.log('  · 重启 DSH（宿主插件只在启动时加载）');
+  console.log('  · 之后只改客户端的话，Ctrl+R 重载渲染进程即可');
+  console.log('  · 想撤销：node rollback.mjs --profile ' + profile.name);
+}
 console.log('');
