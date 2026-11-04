@@ -26,7 +26,8 @@
     "promote": "node promote.mjs",
     "test": "node verify-all.mjs",
     "verify": "node verify-all.mjs",
-    "verify:taxonomy": "node verify-taxonomy.mjs"
+    "verify:taxonomy": "node verify-taxonomy.mjs",
+    "preflight": "node preflight.mjs"
   },
   "files": [
     "*.mjs",
