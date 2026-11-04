@@ -26,6 +26,29 @@ export function normalize(s) {
     .trim();
 }
 
+/** 查询是否含中日韩字符 */
+const hasCJK = /[\u4e00-\u9fa5]/;
+
+/**
+ * 最长公共子串长度（只用于中文兜底）。
+ * 别名是滑窗二元组，没有分词，会产出「写简」「做高」这类碎片；
+ * 直接比连续子串，能把「改简历」对上包含「简历」的描述，不依赖词表质量。
+ */
+function longestCommonSubstring(a, b) {
+  if (!a || !b) return 0;
+  const n = Math.min(a.length, 24);
+  let best = 0;
+  for (let i = 0; i < n; i++) {
+    for (let len = best + 1; i + len <= a.length; len++) {
+      const seg = a.slice(i, i + len);
+      if (b.indexOf(seg) >= 0) {
+        if (len > best) best = len;
+      } else break;
+    }
+  }
+  return best;
+}
+
 /** 描述命中：只做包含判断，不分词 */
 function hitsDescription(it, q) {
   const d = it && it.description;
@@ -83,6 +106,16 @@ export function rankCandidates(items, query, aliases, opts) {
     if (!single && hitsDescription(it, q)) {
       const d = 90 + Math.min(q.length, 10) * 3;
       if (d > best) best = d;
+    }
+
+    // ④ 中文最长公共子串：别名抽词没有分词，会切出「写简」「做高」这种碎片。
+    //    直接比连续子串，能把「改简历」对到包含「简历」的描述上，不依赖词表质量。
+    if (hasCJK.test(q)) {
+      const lcs = longestCommonSubstring(q, normalize(String(it.desc || '')));
+      if (lcs >= 2) {
+        const s = 60 + lcs * 14; // 2 字=88，3 字=102，4 字=116
+        if (s > best) best = s;
+      }
     }
 
     if (best >= minScore) scored.push({ it, score: best });

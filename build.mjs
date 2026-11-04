@@ -183,7 +183,7 @@ for (const [pre, list] of famBuckets) {
     s.tier = 'family';
     s.reason = `同族聚合（${list.length} 个 ${pre}-*，规则低置信且分散在 ${cats.size} 个类）`;
   }
-  dynGroups.push({ id, label: '✦ ' + pre, glyph: '✦', order: 900 + dynGroups.length * 10, blurb: `${pre}-* 生态`, facets: [id] });
+  dynGroups.push({ id, label: pre, glyph: '✦', order: 900 + dynGroups.length * 10, blurb: `${pre}-* 生态`, facets: [id] });
 }
 if (dynGroups.length) {
   console.log(`同族聚合：${dynGroups.map((g) => g.label).join('、')}`);
