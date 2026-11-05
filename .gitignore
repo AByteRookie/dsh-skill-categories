@@ -23,3 +23,6 @@ probe-*.mjs
 Thumbs.db
 .idea/
 .vscode/
+
+# 示意图中间产物（PNG 入库，HTML 现生成）
+docs/*.html
