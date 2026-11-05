@@ -216,10 +216,18 @@ try {
       .map((s) => ({ name: s.name, description: s.desc }));
     await src.candidates({ sessionId: 'SEM2' }, { query: '', signal: {} });
     await new Promise((r) => setTimeout(r, 40));
-    if (rejecters.length) rejecters[0](new Error('stale init failed'));
-    await new Promise((r) => setTimeout(r, 60));
-    const st = api.diagnostics.semanticStatus();
-    ok(st.status !== 'unavailable', '过期任务失败不把索引状态改成 unavailable', String(st.status));
+
+    // 前置条件必须显式断言：至少两个待决任务（旧的 + 新的）。
+    // 否则哪天调度变了，故障根本没注入，这条用例会「什么都没测也绿」。
+    ok(rejecters.length >= 2, '存在至少两个待决索引任务（故障注入前置）', `待决 ${rejecters.length} 个`);
+
+    if (rejecters.length >= 2) {
+      rejecters[0](new Error('stale init failed'));
+      await new Promise((r) => setTimeout(r, 60));
+      const st = api.diagnostics.semanticStatus();
+      ok(st.status !== 'unavailable', '过期任务失败不把索引状态改成 unavailable', String(st.status));
+      ok(st.error !== 'stale init failed', '过期任务的错误不写入当前 error', String(st.error));
+    }
     for (let i = 1; i < rejecters.length; i++) rejecters[i](new Error('cleanup'));
     await new Promise((r) => setTimeout(r, 30));
     api.diagnostics.setSemHooks(null);
@@ -252,6 +260,20 @@ try {
     `unity-* 共 ${unityCount} 个，成组 ${unityGroup ? unityGroup[1].length : 0}`
   );
 
+  // 入口词（别名）通用约束：这些以前只在作者技能库用例里，SKIP 后等于没覆盖
+  const noAlias = visible.filter((s) => !(s.aliases || []).length);
+  ok(noAlias.length === 0, '每个技能都有入口词', noAlias.slice(0, 3).map((s) => s.name).join(','));
+
+  const badLen = [];
+  const dupAlias = [];
+  for (const s of visible) {
+    const list = s.aliases || [];
+    for (const a of list) if (a.length < 1 || a.length > 16) badLen.push(`${s.name}:${a}`);
+    if (new Set(list).size !== list.length) dupAlias.push(s.name);
+  }
+  ok(badLen.length === 0, '入口词长度都在 1–16 字', badLen.slice(0, 3).join(','));
+  ok(dupAlias.length === 0, '入口词无重复', dupAlias.slice(0, 3).join(','));
+
   // 中文检索：查询里不含技能名，靠描述子串命中
   const cases = [
     ['改简历', 'resume-tune'],
@@ -259,6 +281,11 @@ try {
     ['校准温度', 'lab-sensor'],
     ['unity 预制体', 'unity-prefab'],
     ['文档', 'docx-cleaner'],
+    ['做海报', 'poster-maker'],
+    ['图标系统', 'icon-set'],
+    ['转场动效', 'micro-motion'],
+    ['线上故障', 'log-triage'],
+    ['幻灯片', 'deck-polish'],
   ];
   for (const [q, want] of cases) {
     const r = await src.candidates({ sessionId: 'FX' }, { query: q, signal: {} });
