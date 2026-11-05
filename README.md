@@ -245,6 +245,17 @@ career 求职与职业   review 评审         tools 工具集成
 
 ## 修复记录
 
+### 1.0.9 — 验收与生产对齐
+
+v1.0.8 复测通过（安装 16/16、仓库断言 70/70、空白目录 preflight 退出码 0），提出三处维护性问题，已修：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 验收步骤顺序和生产相反 | `verify-fixture` 自己拼成 `ingest → build → aliases → pack`，正式 `setup` 是 `ingest → aliases → build → pack`；顺序反了会让 build 读到上一轮别名表 | 固定数据集直接调 `setup.mjs --skip-asar --no-install`，不再自己拼步骤 |
+| 通用行为只在个人库用例里 | `dispose` / 子代理 / 语义任务过期只在 `verify-client` 中，陌生环境 SKIP 后等于没覆盖 | 迁进固定数据集：dispose 还原、subagent 返回 Promise、过期任务失败不改状态 |
+| 注释仍写五组/六组 | 实际七组 | `verify-all` / `preflight` / workflow 注释统一为七组 |
+
+固定数据集从 12 条扩到 20 条。
 ### 1.0.8 — 自检可信度
 
 v1.0.7 分发复测指出两点，都属"自检自己不可信"：

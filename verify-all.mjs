@@ -1,12 +1,14 @@
 /**
  * verify-all.mjs — 发行前的固定验收集
  *
- * 五组一起跑，任何一组失败即整体失败：
+ * 七组一起跑，任何一组失败即整体失败：
  *   1. 分类体系静态断言      verify-taxonomy
  *   2. 客户端功能与回归      verify-client   （含发行产物 lint + 空缓存建索引）
  *   3. 别名覆盖              verify-names
  *   4. 检索准确率            verify-query
  *   5. 宿主监听与故障注入    verify-host
+ *   6. 安装器失败路径        verify-install
+ *   7. 固定数据集核心行为    verify-fixture
  *
  * 用法：node verify-all.mjs
  */

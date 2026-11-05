@@ -80,17 +80,13 @@ const restore = () => {
 try {
   console.log('\n[固定数据集] 用 fixtures/skills 生成索引');
 
-  for (const [script, args] of [
-    ['ingest.mjs', ['--skip-asar']],
-    ['build.mjs', []],
-    ['aliases.mjs', []],
-    ['pack.mjs', []],
-  ]) {
-    const r = run(script, args);
-    if (r.code !== 0) {
-      ok(false, script + ' 失败', r.out.split(/\r?\n/).slice(-4).join(' | '));
-      throw new Error(script);
-    }
+  // 走正式安装入口，不自己拼步骤：
+  // 原先写成 ingest → build → aliases → pack，而 setup 是 ingest → aliases → build → pack。
+  // 顺序反了，build 会拿到上一轮的别名表，等于测了一条生产上不存在的路径。
+  const setup = run('setup.mjs', ['--skip-asar', '--no-install']);
+  if (setup.code !== 0) {
+    ok(false, 'setup.mjs 生成失败', setup.out.split(/\r?\n/).slice(-4).join(' | '));
+    throw new Error('setup.mjs');
   }
 
   const idx = JSON.parse(readFileSync(join(HERE, 'index.json'), 'utf8'));
@@ -159,7 +155,76 @@ try {
     onPick: () => ({ text: '/' }),
   };
   const svc = { live: { sources: [src] } };
+  const originalCandidates = src.candidates;
+  const originalPick = src.onPick;
   api.apply({ get: (n) => (n === 'inputTriggers' ? svc : undefined), inject: (d, cb) => cb({ get: () => svc }), effect: (f) => f() });
+
+  /* ---------- 通用生命周期（不依赖个人技能库） ---------- */
+
+  // 资源释放：dispose 后必须把宿主函数原样还回去
+  ok(typeof api.dispose === 'function', 'exports.dispose 存在');
+  api.dispose();
+  ok(src.candidates === originalCandidates, 'dispose 后 candidates 还原为原函数');
+  ok(src.onPick === originalPick, 'dispose 后 onPick 还原为原函数');
+  ok(src.__skillCategories === undefined, 'dispose 后包装标记已移除');
+  const afterDispose = await src.candidates({ sessionId: 'FX0' }, { query: '', signal: {} });
+  ok(afterDispose.every((i) => i.section === undefined), 'dispose 后不再注入 section');
+
+  // 重新挂回去，后面的断言继续用
+  api.apply({ get: (n) => (n === 'inputTriggers' ? svc : undefined), inject: (d, cb) => cb({ get: () => svc }), effect: (f) => f() });
+
+  // 子代理会话：返回空候选，且必须是 Promise（宿主直接 .then）
+  {
+    const subSrc = {
+      trigger: '/',
+      name: 'skill',
+      order: 2,
+      async candidates() {
+        return [{ name: 'never-shown', description: 'x' }];
+      },
+      onPick: () => ({ text: '/' }),
+    };
+    const subSvc = { live: { sources: [subSrc] } };
+    const subSessions = {
+      using: async (id, o, fn) => fn({ binding: { session: { getSnapshot: () => ({ openState: 'open' }) } } }),
+      subagentAddress: () => ({ agent: 'child' }),
+    };
+    api.apply({
+      get: (n) => (n === 'inputTriggers' ? subSvc : n === 'sessions' ? subSessions : undefined),
+      inject: (d, cb) => cb({ get: (n) => (n === 'inputTriggers' ? subSvc : n === 'sessions' ? subSessions : undefined) }),
+      effect: (f) => f(),
+    });
+    const r = subSrc.candidates({ sessionId: 'SUB' }, { query: '', signal: {} });
+    ok(typeof r.then === 'function', 'subagent 分支返回 Promise');
+    const v = await r;
+    ok(Array.isArray(v) && v.length === 0, 'subagent 会话返回空候选', String(v && v.length));
+    api.dispose();
+    api.apply({ get: (n) => (n === 'inputTriggers' ? svc : undefined), inject: (d, cb) => cb({ get: () => svc }), effect: (f) => f() });
+  }
+
+  // 语义索引：过期任务的初始化失败不得改写当前状态
+  {
+    const rejecters = [];
+    api.diagnostics.setSemHooks({
+      importLib: () => new Promise((res, rej) => rejecters.push(rej)),
+    });
+    await src.candidates({ sessionId: 'SEM1' }, { query: '', signal: {} });
+    await new Promise((r) => setTimeout(r, 40));
+    // 目录变了 → 任务代次过期
+    catalog = visible
+      .filter((s) => s.name !== 'log-triage')
+      .map((s) => ({ name: s.name, description: s.desc }));
+    await src.candidates({ sessionId: 'SEM2' }, { query: '', signal: {} });
+    await new Promise((r) => setTimeout(r, 40));
+    if (rejecters.length) rejecters[0](new Error('stale init failed'));
+    await new Promise((r) => setTimeout(r, 60));
+    const st = api.diagnostics.semanticStatus();
+    ok(st.status !== 'unavailable', '过期任务失败不把索引状态改成 unavailable', String(st.status));
+    for (let i = 1; i < rejecters.length; i++) rejecters[i](new Error('cleanup'));
+    await new Promise((r) => setTimeout(r, 30));
+    api.diagnostics.setSemHooks(null);
+    catalog = visible.map((s) => ({ name: s.name, description: s.desc }));
+  }
 
   /* ---------- 断言 ---------- */
 

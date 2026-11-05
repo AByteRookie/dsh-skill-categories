@@ -4,7 +4,7 @@
  * 与 .github/workflows/verify.yml 的 acceptance job 等价：
  *   1. 造一个没有 profile 的空 DSH_HOME（模拟 CI runner）
  *   2. setup.mjs --skip-asar --no-install（CI 的第一条命令）
- *   3. verify-all.mjs（六组检查）
+ *   3. verify-all.mjs（七组检查）
  *
  * 用法：node preflight.mjs
  */
@@ -35,7 +35,7 @@ if (code !== 0) {
   process.exit(1);
 }
 
-code = step('验收（六组）', ['verify-all.mjs']);
+code = step('验收（七组）', ['verify-all.mjs']);
 rmSync(home, { recursive: true, force: true });
 
 if (code !== 0) {
