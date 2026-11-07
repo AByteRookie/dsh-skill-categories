@@ -327,8 +327,9 @@ ok(
 
 console.log('\n[5b2] 模型不可用时必须安静降级');
 
-// dispose now cancels and clears old work; explicitly start a new model load.
+// 浏览路径不再触发语义加载（那会卡菜单），这里显式启动一次，验证 import 失败时的降级。
 await s2.candidates(sessA, { query: '', signal: {} });
+api.diagnostics.semanticWarm(SKILLS.map((s) => ({ name: s.name, description: s.description })));
 await new Promise((r) => setTimeout(r, 1200));
 const semState = api.diagnostics.semanticStatus();
 ok(

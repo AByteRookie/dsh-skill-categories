@@ -711,6 +711,13 @@ ${rankSrc
 			}
 			return true;
 		};
+		diag.cancelWarm = function () {
+			if (WARM_TIMER) {
+				clearTimeout(WARM_TIMER);
+				WARM_TIMER = null;
+			}
+			return true;
+		};
 		diag.semanticWarm = function (items) {
 			semLoad(items || []);
 			return diag.semanticStatus();
@@ -906,6 +913,49 @@ ${rankSrc
 		/** 自动化测试注入点：生产环境为 null，可控制导入与 pipeline 的完成时机 */
 		var SEM_HOOKS = null;
 
+		/**
+		 * 语义索引预热：**必须离开菜单打开路径**。
+		 *
+		 * 以前浏览时直接 semLoad，用户一按 / 就去 import CDN 上的 transformers 并建 pipeline，
+		 * ONNX 初始化与权重解析跑在渲染主线程上，首次卡 1–3 秒。
+		 * 现在改成：菜单关闭且用户停手 6 秒后才在后台开始，而且一旦又开始输入就顺延。
+		 */
+		var WARM_TIMER = null;
+		var WARM_DELAY_MS = 6000;
+		var LAST_INTERACTION = 0;
+
+		function scheduleWarm(items) {
+			if (SEM.status !== 'idle' || !items || !items.length) return;
+			// 测试注入点在场时立即预热：用例要的是可控时序，不是等 6 秒
+			if (SEM_HOOKS) {
+				SEM.warmStartedAt = Date.now();
+				semLoad(items);
+				return;
+			}
+			if (WARM_TIMER) return;
+			diag.warmScheduled = (diag.warmScheduled || 0) + 1;
+			WARM_TIMER = setTimeout(function () {
+				WARM_TIMER = null;
+				try {
+					if (SEM.status !== 'idle') return;
+					// 用户还在打字 / 菜单还开着 → 顺延，别在主线程上抢
+					if (Date.now() - LAST_INTERACTION < 2500) {
+						scheduleWarm(items);
+						return;
+					}
+					if (typeof document !== 'undefined' && document.hidden) {
+						scheduleWarm(items);
+						return;
+					}
+					SEM.warmStartedAt = Date.now();
+					diag.warmStarted = (diag.warmStarted || 0) + 1;
+					semLoad(items);
+				} catch (e) {
+					diag.degraded = 'warm:' + (e && e.message);
+				}
+			}, WARM_DELAY_MS);
+		}
+
 ${runtimeSource("runtime-semantic.mjs")}
 
 		/** 返回 [{name, s}]，按相似度降序；未就绪或失败返回 null */
@@ -1075,6 +1125,7 @@ ${runtimeSource("runtime-catalog.mjs")}
 
 			src.candidates = function (session, req) {
 				var self = this === undefined ? src : this;
+				try { LAST_INTERACTION = Date.now(); } catch (e) {}
 				var query = req && typeof req.query === 'string' ? req.query : '';
                 var signal = req && req.signal;
                 if (signal && signal.aborted) return Promise.resolve([]);
@@ -1195,8 +1246,10 @@ ${runtimeSource("runtime-catalog.mjs")}
 					ensureCovered(all, session);
 
 					if (!query) {
-						// 浏览时后台预热向量索引（首次约 26s 下载 + 1s 计算，不阻塞菜单）
-						if (SEM.status === 'idle' && all.length) semLoad(all);
+						// 以前在这里直接 semLoad：菜单一打开就去 import CDN 上的 transformers
+						// 并建 pipeline，ONNX 初始化跑在渲染主线程，首次 1–3 秒的卡顿就是这么来的。
+						// 浏览根本用不到向量，改成纯后台空闲预热，且要等菜单关掉。
+						scheduleWarm(all);
 						var grouped = decorateGroups(all);
 						remember(session, '', grouped);
 						log({ q: '', n: grouped.length });

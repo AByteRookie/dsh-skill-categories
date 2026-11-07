@@ -159,6 +159,16 @@ try {
   const originalPick = src.onPick;
   api.apply({ get: (n) => (n === 'inputTriggers' ? svc : undefined), inject: (d, cb) => cb({ get: () => svc }), effect: (f) => f() });
 
+  // 浏览路径绝对不允许启动模型加载：那是每次启动首次按 / 卡几秒的根因。
+  {
+    api.diagnostics.cancelWarm();
+    const startedBefore = api.diagnostics.warmStarted || 0;
+    const scheduledBefore = api.diagnostics.warmScheduled || 0;
+    await src.candidates({ sessionId: 'NOWARM' }, { query: '', signal: {} });
+    ok((api.diagnostics.warmStarted || 0) === startedBefore, '浏览不启动模型加载（只排后台预热）');
+    ok((api.diagnostics.warmScheduled || 0) > scheduledBefore, '后台预热已被排期');
+    api.diagnostics.cancelWarm();
+  }
   /* ---------- 通用生命周期（不依赖个人技能库） ---------- */
 
   // 资源释放：dispose 后必须把宿主函数原样还回去

@@ -42,6 +42,15 @@ function semanticPipeline() {
   return task.promise;
 }
 
+function noteSem(state) {
+  try {
+    var ms = SEM.warmStartedAt ? Date.now() - SEM.warmStartedAt : 0;
+    window.localStorage.setItem(
+      'dsh.skillcat.sem',
+      JSON.stringify({ at: Date.now(), status: state, ms: ms, indexed: (SEM.vectors || []).length, err: String(SEM.error || '').slice(0, 160) })
+    );
+  } catch (e) {}
+}
 function semLoad(items) {
   if (SEM.status !== 'idle') return;
   SEM.status = 'loading';
@@ -80,6 +89,7 @@ function semLoad(items) {
     function fail(error) {
       if (stale()) return;
       SEM.status = 'unavailable';
+      noteSem('unavailable');
       SEM.error = 'index:' + String(error && error.message || error);
     }
     function step() {
@@ -97,6 +107,7 @@ function semLoad(items) {
         VECTOR_CACHE = nextCache;
         SEM.vectors = out;
         SEM.status = 'ready';
+      noteSem('ready');
         SEM.error = null;
         try {
           var payload = out.map(function (v, i) { return [v.name, b64enc(v.vec), vectorKey(items[i])]; });
