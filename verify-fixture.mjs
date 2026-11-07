@@ -102,6 +102,8 @@ try {
   /* ---------- 在仿真宿主里跑真实 bundle ---------- */
 
   const store = new Map();
+let idleCalls = 0;
+let idleCb = null;
   const win = {
     __ModuleLoader__: { load: (c) => (captured = c) },
     localStorage: {
@@ -135,6 +137,14 @@ try {
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
   };
+  // bundle 里的裸 requestIdleCallback 走的是真实全局，不是 window 形参
+  globalThis.requestIdleCallback = (cb) => {
+    idleCalls++;
+    idleCb = cb;
+    return idleCalls;
+  };
+  globalThis.cancelIdleCallback = () => {};
+
   let captured = null;
   new Function('window', 'globalThis', readFileSync(clientFile, 'utf8'))(win, win);
   const api = captured.factory(() => {
@@ -167,6 +177,9 @@ try {
     await src.candidates({ sessionId: 'NOWARM' }, { query: '', signal: {} });
     ok((api.diagnostics.warmStarted || 0) === startedBefore, '浏览不启动模型加载（只排后台预热）');
     ok((api.diagnostics.warmScheduled || 0) > scheduledBefore, '后台预热已被排期');
+    // 排期走的是 requestIdleCallback，不是拍一个固定秒数
+    ok(api.diagnostics.warmState().kind === 'idle', '预热由浏览器空闲驱动（非固定延时）', String(api.diagnostics.warmState().kind));
+    ok(typeof idleCb === 'function', 'rIC 回调已注册');
     api.diagnostics.cancelWarm();
   }
   /* ---------- 通用生命周期（不依赖个人技能库） ---------- */

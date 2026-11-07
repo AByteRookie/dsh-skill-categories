@@ -27,7 +27,24 @@ function semanticPipeline() {
     if (hooks && typeof hooks.makePipe === 'function') return hooks.makePipe(mod);
     mod.env.allowLocalModels = false;
     mod.env.useBrowserCache = true;
-    return mod.pipeline('feature-extraction', SEM.model, { quantized: true });
+    // 关键：把 ONNX 放到 Web Worker 里跑。
+    // 默认实现把权重解析和推理都放在渲染主线程，初始化那一刻界面会直接停住几秒——
+    // 这才是「按 / 卡住」的真正原因；把开工时间推迟只是把卡顿挪到别处。
+    try {
+      if (mod.env.backends && mod.env.backends.onnx && mod.env.backends.onnx.wasm) {
+        mod.env.backends.onnx.wasm.proxy = true;
+        SEM.proxy = true;
+      }
+    } catch (e) {}
+    return mod.pipeline('feature-extraction', SEM.model, { quantized: true }).catch(function (error) {
+      // 某些环境不允许建 Worker（CSP / 文件协议）：退回主线程，宁可慢也不能没有语义
+      if (!SEM.proxy) throw error;
+      SEM.proxy = false;
+      try {
+        mod.env.backends.onnx.wasm.proxy = false;
+      } catch (e) {}
+      return mod.pipeline('feature-extraction', SEM.model, { quantized: true });
+    });
   }).then(function (pipe) {
     if (PIPE_TASK !== task) {
       if (pipe && typeof pipe.dispose === 'function') Promise.resolve().then(function () { return pipe.dispose(); }).catch(function () {});

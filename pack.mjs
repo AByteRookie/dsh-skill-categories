@@ -711,11 +711,18 @@ ${rankSrc
 			}
 			return true;
 		};
+		diag.warmState = function () {
+			return { kind: WARM_KIND, pending: !!WARM_HANDLE, started: diag.warmStarted || 0, scheduled: diag.warmScheduled || 0 };
+		};
 		diag.cancelWarm = function () {
-			if (WARM_TIMER) {
-				clearTimeout(WARM_TIMER);
-				WARM_TIMER = null;
-			}
+			try {
+				if (WARM_HANDLE) {
+					if (WARM_KIND === 'idle' && typeof cancelIdleCallback === 'function') cancelIdleCallback(WARM_HANDLE);
+					else clearTimeout(WARM_HANDLE);
+				}
+			} catch (e) {}
+			WARM_HANDLE = null;
+			WARM_KIND = null;
 			return true;
 		};
 		diag.semanticWarm = function (items) {
@@ -914,36 +921,54 @@ ${rankSrc
 		var SEM_HOOKS = null;
 
 		/**
-		 * 语义索引预热：**必须离开菜单打开路径**。
+		 * 语义索引预热。
 		 *
-		 * 以前浏览时直接 semLoad，用户一按 / 就去 import CDN 上的 transformers 并建 pipeline，
-		 * ONNX 初始化与权重解析跑在渲染主线程上，首次卡 1–3 秒。
-		 * 现在改成：菜单关闭且用户停手 6 秒后才在后台开始，而且一旦又开始输入就顺延。
+		 * 两条原则：
+		 *   1. **不在菜单打开路径上开工** —— 以前一次按 / 就 import CDN + 建 pipeline。
+		 *   2. **用“浏览器空闲”决定何时开工，而不是拍一个秒数** ——
+		 *      6 秒是拍的，用户可能正好在那一刻打字；requestIdleCallback 只有在主线程真的空下来
+		 *      才回调，忙的时候自动推迟，这才是「不抢用户线程」的正确判据。
+		 *
+		 * 另外 pipeline 里的 ONNX 走 Worker（proxy=true），进一步避免主线程卡顿。
 		 */
-		var WARM_TIMER = null;
-		var WARM_DELAY_MS = 6000;
+		var WARM_HANDLE = null;
+		var WARM_KIND = null;
+		var WARM_TIMEOUT_MS = 15000; // rIC 的最长等待：再忙也不能永远不预热
+		var IDLE_GUARD_MS = 1200; // 距上次交互不足这个时间就继续等
 		var LAST_INTERACTION = 0;
 
 		function scheduleWarm(items) {
 			if (SEM.status !== 'idle' || !items || !items.length) return;
-			// 测试注入点在场时立即预热：用例要的是可控时序，不是等 6 秒
+			// 测试注入点在场时立即预热：用例要的是可控时序
 			if (SEM_HOOKS) {
 				SEM.warmStartedAt = Date.now();
+				diag.warmStarted = (diag.warmStarted || 0) + 1;
 				semLoad(items);
 				return;
 			}
-			if (WARM_TIMER) return;
+			if (WARM_HANDLE) return;
 			diag.warmScheduled = (diag.warmScheduled || 0) + 1;
-			WARM_TIMER = setTimeout(function () {
-				WARM_TIMER = null;
+
+			var start = function (deadline) {
+				WARM_HANDLE = null;
+				WARM_KIND = null;
 				try {
 					if (SEM.status !== 'idle') return;
-					// 用户还在打字 / 菜单还开着 → 顺延，别在主线程上抢
-					if (Date.now() - LAST_INTERACTION < 2500) {
-						scheduleWarm(items);
+					if (Date.now() - LAST_INTERACTION < IDLE_GUARD_MS) {
+						scheduleWarm(items); // 用户正在动，继续等空闲
 						return;
 					}
 					if (typeof document !== 'undefined' && document.hidden) {
+						scheduleWarm(items);
+						return;
+					}
+					// rIC 回调但时间预算已耗尽且不是超时触发 → 让给用户
+					if (
+						deadline &&
+						typeof deadline.timeRemaining === 'function' &&
+						deadline.didTimeout !== true &&
+						deadline.timeRemaining() <= 0
+					) {
 						scheduleWarm(items);
 						return;
 					}
@@ -953,7 +978,20 @@ ${rankSrc
 				} catch (e) {
 					diag.degraded = 'warm:' + (e && e.message);
 				}
-			}, WARM_DELAY_MS);
+			};
+
+			try {
+				if (typeof requestIdleCallback === 'function') {
+					WARM_KIND = 'idle';
+					WARM_HANDLE = requestIdleCallback(start, { timeout: WARM_TIMEOUT_MS });
+					return;
+				}
+			} catch (e) {}
+			// 没有 rIC（老环境）：退回短定时器，但同样要求“超过 IDLE_GUARD_MS 没交互”
+			WARM_KIND = 'timer';
+			WARM_HANDLE = setTimeout(function () {
+				start(null);
+			}, IDLE_GUARD_MS + 300);
 		}
 
 ${runtimeSource("runtime-semantic.mjs")}
