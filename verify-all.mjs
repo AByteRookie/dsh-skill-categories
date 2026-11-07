@@ -3,12 +3,13 @@
  *
  * 七组一起跑，任何一组失败即整体失败：
  *   1. 分类体系静态断言      verify-taxonomy
- *   2. 客户端功能与回归      verify-client   （含发行产物 lint + 空缓存建索引）
- *   3. 别名覆盖              verify-names
- *   4. 检索准确率            verify-query
- *   5. 宿主监听与故障注入    verify-host
- *   6. 安装器失败路径        verify-install
- *   7. 固定数据集核心行为    verify-fixture
+ *   2. 分类依据一致性闸门    verify-consistency（菜单 = 索引 = 运行期算法）
+ *   3. 客户端功能与回归      verify-client   （含发行产物 lint + 空缓存建索引）
+ *   4. 别名覆盖              verify-names
+ *   5. 检索准确率            verify-query
+ *   6. 宿主监听与故障注入    verify-host
+ *   7. 安装器失败路径        verify-install
+ *   8. 固定数据集核心行为    verify-fixture
  *
  * 用法：node verify-all.mjs
  */
@@ -21,6 +22,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 const SUITES = [
   ['分类体系', 'verify-taxonomy.mjs'],
+  ['一致性', 'verify-consistency.mjs'],
   ['客户端', 'verify-client.mjs'],
   ['别名', 'verify-names.mjs'],
   ['检索', 'verify-query.mjs'],

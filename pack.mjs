@@ -69,15 +69,22 @@ catName.misc = '未归类';
 const catShort = {};
 for (const id of Object.keys(catName)) catShort[id] = String(catName[id]).split('与')[0];
 
-/** 每个展示类的可见技能数 */
+/**
+ * 计数口径（分类依据 v1，见 docs/CLASSIFICATION.md）：
+ *   TOTAL = 目录里出现的**所有**技能，CATCOUNT = 每个展示类的条目数。
+ *
+ * 为什么不按 userInvocable 过滤：列表本身会把隐藏技能（只允许模型调用、
+ * 不允许用户点的那几个）也渲染出来。若只统计可见的，就会出现
+ * 「评审 19」但下面明明列了 21 行 —— 芯片数字和列表行数对不上。
+ * 口径必须和渲染面一致，否则用户一旦数行数就会发现矛盾。
+ */
 const catCount = {};
 for (const s of idx.skills) {
-  if (!s.userInvocable) continue;
   const c = map[s.name];
   catCount[c] = (catCount[c] || 0) + 1;
 }
-/** 可见总数 */
-const total = idx.skills.filter((s) => s.userInvocable).length;
+/** 目录总数（与 CATCOUNT 各项之和恒等） */
+const total = idx.skills.length;
 
 /**
  * 规则表打进 bundle。

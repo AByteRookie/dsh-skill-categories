@@ -421,7 +421,9 @@ await new Promise((r) => setTimeout(r, 400));
 
 // 期望值必须从 index 推导：写死 9/110 会在技能库变化时误报，
 // 而真正该守的是「bundle 与数据一致」这件事。
-const visible = idx.skills.filter((s) => s.userInvocable);
+// 口径 = 目录里出现的全部技能（含只允许模型调用的隐藏项）：列表会把它们渲染出来，
+// 计数若漏掉就会出现「芯片 19 / 列表 21 行」的矛盾。详见 docs/CLASSIFICATION.md。
+const visible = idx.skills;
 const expectCats = new Set(visible.map((s) => s.category));
 
 const rootHeader = hdrSrc.header({}, { query: '', quoted: false, drilled: false });
@@ -436,14 +438,14 @@ ok(
   rootHeader.map((c) => c.label).join(',')
 );
 const sum = rootHeader.reduce((a, c) => a + Number(c.label.split(' ').pop()), 0);
-ok(sum === visible.length, `芯片数量之和等于可见技能数 ${visible.length}（实际 ${sum}）`);
+ok(sum === visible.length, `芯片数量之和等于目录条数 ${visible.length}（实际 ${sum}）`);
 
-// 产物一致性：bundle 里烤死的 TOTAL 必须等于索引可见数。
+// 产物一致性：bundle 里烤死的 TOTAL 必须等于索引条数。
 // 这条能挡住「手工热补丁改 bundle / 用旧 index 打包」这类静默漂移。
 const totalInBundle = /var TOTAL = (\d+);/.exec(src);
 ok(
   totalInBundle && Number(totalInBundle[1]) === visible.length,
-  'bundle 的 TOTAL 与 index.json 可见数一致',
+  'bundle 的 TOTAL 与 index.json 条数一致',
   totalInBundle ? `${totalInBundle[1]} vs ${visible.length}` : '未找到 TOTAL'
 );
 
