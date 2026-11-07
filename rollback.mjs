@@ -2,8 +2,8 @@
  * rollback.mjs — 撤销安装
  *
  * 做三件事：
- *   1. 从最近的 package.json.bak-skillcat-* 备份恢复（如果有）
- *   2. 否则从 package.json 里精确摘掉本插件（依赖 + bundles）
+ *   1. 保留历史备份，不用旧快照覆盖当前配置
+ *   2. 从当前 package.json 精确摘掉本插件（依赖 + bundles）
  *   3. 删除 profile/node_modules 下的链接
  *
  * 插件源码目录保留（可再次安装）。
@@ -12,7 +12,7 @@
  *   node rollback.mjs --profile web
  */
 
-import { readdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PLUGIN_NAME, activeProfile, pluginDir } from './paths.mjs';
@@ -25,20 +25,8 @@ const arg = (name) => {
 const profile = activeProfile(arg('--profile'));
 const changes = [];
 
-/* ---------------------------- 1. 优先用备份 ---------------------------- */
-
-const backups = existsSync(profile.dir)
-  ? readdirSync(profile.dir)
-      .filter((f) => f.startsWith('package.json.bak-skillcat-'))
-      .sort()
-  : [];
-const latest = backups.length ? join(profile.dir, backups[backups.length - 1]) : null;
-
-if (latest) {
-  writeFileSync(join(profile.dir, 'package.json'), readFileSync(latest, 'utf8'), 'utf8');
-  changes.push(`package.json 从 ${latest.split(/[\\/]/).pop()} 恢复`);
-} else {
-  // 没有备份就精确摘除，别动用户的其它配置
+/* Preserve later installs/settings; never restore a whole historical profile. */
+{
   const pkgPath = profile.pkgPath;
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8').replace(/^\uFEFF/, ''));
 

@@ -45,7 +45,7 @@ const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf8').replace(/^\uFEFF/, ''));
 function ensureLink() {
   const linkPath = join(profile.dir, 'node_modules', PLUGIN_NAME);
   const target = pluginDir();
-  if (!existsSync(join(target, 'lib', 'client.js'))) {
+  if (!existsSync(join(target, 'lib', 'client.js')) || !existsSync(join(target, 'lib', 'index.js'))) {
     return { ok: false, reason: '插件目录尚未生成（先跑 pack.mjs）' };
   }
 

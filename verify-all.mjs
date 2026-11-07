@@ -39,7 +39,7 @@ for (const [name, file] of SUITES) {
   const line =
     (out.match(/断言：\d+ 通过 \/ \d+ 失败/) ||
       out.match(/方案 A[^\n]*/) ||
-      out.match(/结果：\d+ 通过 \/ \d+ 失败/) ||
+      out.match(/结果：\d+ 通过 \/ \d+ 失败/g)?.slice(-1) ||
       out.match(/宿主结果：\d+ 通过 \/ \d+ 失败/) || [''])[0];
   const good = r.status === 0;
   if (!good) failed++;

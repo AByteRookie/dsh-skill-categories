@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, 'fixtures', 'skills');
-const GENERATED = ['index.json', 'inventory.json', 'aliases.json'];
+const GENERATED = ['index.json', 'inventory.json', 'aliases.json', 'curated.json'];
 
 let pass = 0;
 let fail = 0;
@@ -210,7 +210,8 @@ try {
     });
     await src.candidates({ sessionId: 'SEM1' }, { query: '', signal: {} });
     await new Promise((r) => setTimeout(r, 40));
-    // 目录变了 → 任务代次过期
+    api.diagnostics.setSemHooks({ importLib: () => new Promise((res, rej) => rejecters.push(rej)) });
+    // 更换测试 provider 并更新目录，使旧初始化任务过期
     catalog = visible
       .filter((s) => s.name !== 'log-triage')
       .map((s) => ({ name: s.name, description: s.desc }));
@@ -316,6 +317,11 @@ try {
   const h2 = src.header({ sessionId: 'FX2' }, { query: '', quoted: false, drilled: false });
   const t2 = h2.reduce((a, c) => a + Number(String(c.label).split(' ').pop()), 0);
   ok(t2 === 0, '空目录后合计归零', String(t2));
+  for (const test of ['verify-resilience.mjs', 'verify-host-resilience.mjs']) {
+    const result = run(test, [HERE, join(home, 'local-plugins', 'dsh-skill-categories')]);
+    console.log(result.out);
+    ok(result.code === 0, test + ' 隔离回归通过');
+  }
 } catch (e) {
   if (!/^(ingest|build|aliases|pack)\.mjs$/.test(String(e.message))) {
     console.error('异常：' + e.message);

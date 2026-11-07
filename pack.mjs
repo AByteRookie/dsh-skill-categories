@@ -35,6 +35,7 @@ const rankSrc = readFileSync(join(HERE, 'rank-core.mjs'), 'utf8')
   .trim();
 
 // 输出位置统一从 paths.mjs 取，这样 DSH_HOME 覆盖对生成阶段也生效
+const runtimeSource = (name) => readFileSync(join(HERE, name), 'utf8');
 const OUT = pluginDir();
 mkdirSync(join(OUT, 'lib'), { recursive: true });
 
@@ -190,7 +191,17 @@ export function apply(ctx) {
 		let timer = null;
 		let hits = 0;
 
+        // Only catalog metadata can invalidate a skill listing. Ignore recursive
+        // dependency/build output events and backup skill directories.
+        const relevant = (event, file) => {
+            if (!file) return true;
+            const parts = String(file).split(String.fromCharCode(92)).join('/').split('/');
+            if (parts.some((p) => p.startsWith('.') || p === 'node_modules' || /[.](bak|backup)[-. ]/i.test(p))) return false;
+            if (parts.length === 1) return event === 'rename';
+            return parts.length === 2 && parts[1].toLowerCase() === 'skill.md';
+        };
 		const bump = (event, file) => {
+            if (!relevant(event, file)) return;
 			if (timer) clearTimeout(timer);
 			timer = setTimeout(() => {
 				timer = null;
@@ -414,7 +425,7 @@ ${rankSrc
 		 * 计数口径：TOTAL 统计「所有见过的可见技能」，CATCOUNT 只统计已归类的。
 		 * 所以落进未归类的也要进 CATCOUNT.misc，否则面包屑总数和芯片之和会对不上。
 		 */
-		function ensureCovered(all) {
+		function ensureCovered(all, session) {
 			// 空目录同样要协调：计数归零、指纹更新、索引作废。
 			// 之前这里直接 return，导致删光技能后 header 还显示旧数量。
 			if (!all) return;
@@ -544,7 +555,7 @@ ${rankSrc
 
 			// 计数一律从「当前目录」重算：不再保留构建时常量，
 			// 否则目录里删掉一个打包时就有的技能，数字纹丝不动。
-			recount(all);
+			recount(all, session);
 
 			// 索引跟随目录：内容一变就作废，下次浏览时重建
 			var fp = catalogFingerprint(all);
@@ -563,7 +574,7 @@ ${rankSrc
 		}
 
 		/** 按当前可见目录重算每个分类的数量与总数 */
-		function recount(all) {
+		function recount(all, session) {
 			var cat;
 			for (cat in CATCOUNT) {
 				if (Object.prototype.hasOwnProperty.call(CATCOUNT, cat)) CATCOUNT[cat] = 0;
@@ -580,7 +591,7 @@ ${rankSrc
 			TOTAL = total;
 			diag.recounted = (diag.recounted || 0) + 1;
 			// 数字变了就地修已经发给宿主的面包屑，避免「芯片 23 / 分组 24」
-			syncCrumbs();
+			syncCrumbs(session);
 		}
 
 		/**
@@ -694,6 +705,9 @@ ${rankSrc
 				SEM.error = null;
 				SEM.vectors = null;
 				SEM.gen++;
+				dropPipeline();
+				VECTOR_CACHE.clear();
+				VECTOR_CACHE_LOADED = false;
 			}
 			return true;
 		};
@@ -892,114 +906,25 @@ ${rankSrc
 		/** 自动化测试注入点：生产环境为 null，可控制导入与 pipeline 的完成时机 */
 		var SEM_HOOKS = null;
 
-		function semLoad(items) {
-			if (SEM.status !== 'idle') return;
-			SEM.status = 'loading';
-
-			// 任务代次：建索引是异步的，期间目录可能换了。
-			// 过期的任务不许提交向量、不许写持久缓存（否则旧结果会盖上新的指纹）。
-			var myGen = ++SEM.gen;
-			var myFp = SEM.fp;
-			var stale = function () {
-				return myGen !== SEM.gen || myFp !== SEM.fp;
-			};
-
-			Promise.resolve()
-				.then(function () {
-					if (SEM_HOOKS && typeof SEM_HOOKS.importLib === 'function') return SEM_HOOKS.importLib();
-					return import(SEM.libUrl);
-				})
-				.then(function (mod) {
-					if (SEM_HOOKS && typeof SEM_HOOKS.makePipe === 'function') return SEM_HOOKS.makePipe(mod);
-					mod.env.allowLocalModels = false;
-					mod.env.useBrowserCache = true;
-					return mod.pipeline('feature-extraction', SEM.model, { quantized: true });
-				})
-				.then(function (pipe) {
-					if (stale()) return;
-					SEM.pipe = pipe;
-
-					// 先试缓存（必须连指纹一起匹配：只比条数会把换掉的技能当成同一批）
-					try {
-						var cached = window.localStorage.getItem(SEM.cacheKey);
-						if (cached) {
-							var obj = JSON.parse(cached);
-							if (obj && obj.fp && obj.fp === myFp && obj.v) {
-								var vecs = [];
-								for (var k = 0; k < obj.v.length; k++) {
-									vecs.push({ name: obj.v[k][0], vec: b64dec(obj.v[k][1]) });
-								}
-								if (stale()) return;
-								SEM.vectors = vecs;
-								SEM.status = 'ready';
-								return;
-							}
-						}
-					} catch (e) {}
-
-					// 逐条向量化
-					var out = [];
-					var idx = 0;
-					var step = function () {
-						if (stale()) {
-							// 「被取代」是正常生命周期，不是错误：单独计数，不污染 error
-							SEM.superseded = (SEM.superseded || 0) + 1;
-							return;
-						}
-						if (idx >= items.length) {
-							SEM.vectors = out;
-							SEM.status = 'ready';
-							SEM.error = null; // 当前任务成功，清掉历史错误
-							try {
-								var payload = [];
-								for (var m = 0; m < out.length; m++) payload.push([out[m].name, b64enc(out[m].vec)]);
-								// 写缓存用任务自己的指纹，不是当时的全局值
-								window.localStorage.setItem(
-									SEM.cacheKey,
-									JSON.stringify({ n: out.length, fp: myFp, v: payload })
-								);
-							} catch (e) {
-								// 配额不足就只放内存，下次重算
-							}
-							return;
-						}
-						var it = items[idx++];
-						var text = String(it.name || '').replace(/-/g, ' ') + '. ' + String(it.description || '');
-						pipe(text, { pooling: 'mean', normalize: true })
-							.then(function (r) {
-								out.push({ name: it.name, vec: new Float32Array(r.data) });
-								step();
-							})
-							.catch(function (e) {
-								if (stale()) return;
-								SEM.status = 'unavailable';
-								SEM.error = 'index:' + String((e && e.message) || e);
-							});
-					};
-					step();
-				})
-				.catch(function (e) {
-					// 最外层（动态导入 / pipeline 初始化）同样要先验代次：
-					// 旧任务在新索引就绪之后才失败时，不能把新索引改成 unavailable。
-					if (stale()) return;
-					SEM.status = 'unavailable';
-					SEM.error = String((e && e.message) || e);
-				});
-		}
+${runtimeSource("runtime-semantic.mjs")}
 
 		/** 返回 [{name, s}]，按相似度降序；未就绪或失败返回 null */
 		function semRank(query) {
 			if (SEM.status !== 'ready' || !SEM.pipe || !SEM.vectors) return Promise.resolve(null);
+			var generation = SEM.gen;
+			var pipe = SEM.pipe;
+			var vectors = SEM.vectors;
 			return Promise.resolve()
 				.then(function () {
-					return SEM.pipe(query, { pooling: 'mean', normalize: true });
+					return pipe(query, { pooling: 'mean', normalize: true });
 				})
 				.then(function (r) {
+					if (generation !== SEM.gen) return null;
 					var q = new Float32Array(r.data);
 					var scored = [];
-					for (var i = 0; i < SEM.vectors.length; i++) {
-						var s = cosine(q, SEM.vectors[i].vec);
-						if (s >= SEM.minCos) scored.push({ name: SEM.vectors[i].name, s: s });
+					for (var i = 0; i < vectors.length; i++) {
+						var s = cosine(q, vectors[i].vec);
+						if (s >= SEM.minCos) scored.push({ name: vectors[i].name, s: s });
 					}
 					scored.sort(function (a, b) {
 						return b.s - a.s;
@@ -1007,7 +932,7 @@ ${rankSrc
 					return scored.slice(0, SEM.maxAdd);
 				})
 				.catch(function (e) {
-					SEM.error = String((e && e.message) || e);
+					if (generation === SEM.gen) SEM.error = String((e && e.message) || e);
 					return null;
 				});
 		}
@@ -1035,68 +960,7 @@ ${rankSrc
 		 * 根视图返回 9 个分类芯片（名字 + 数量），点一下跳到该类；
 		 * 筛选视图返回「全部 + 当前类」，当前类不可点（current: true）。
 		 */
-		function buildHeader(session, ctx) {
-			var q = ctx && typeof ctx.query === 'string' ? ctx.query : '';
-			var catId = matchCat(q);
-			var ids = [];
-			for (var id in CATCOUNT) if (CATCOUNT[id] > 0) ids.push(id);
-			ids.sort(function (a, b) {
-				var oa = CATS[a] ? CATS[a].order : 999;
-				var ob = CATS[b] ? CATS[b].order : 999;
-				return oa - ob;
-			});
-
-			if (catId) {
-				LAST_CRUMBS = [
-					{ label: '全部 ' + TOTAL, value: 'root' },
-					{
-						label: (CATSHORT[catId] || catId) + ' ' + (CATCOUNT[catId] || 0),
-						value: 'cat:' + catId,
-						current: true
-					}
-				];
-				return LAST_CRUMBS;
-			}
-			var chips = [];
-			for (var i = 0; i < ids.length; i++) {
-				chips.push({ label: (CATSHORT[ids[i]] || ids[i]) + ' ' + CATCOUNT[ids[i]], value: 'cat:' + ids[i] });
-			}
-			LAST_CRUMBS = chips;
-			return chips;
-		}
-
-		/**
-		 * 宿主是「先算 header、再取 candidates」（input-trigger 的 refreshHeaders 早于 fetchCandidates）。
-		 * 所以装完技能第一次打开菜单时，芯片上的数字还是上一次的，而分组标题已经按新目录算。
-		 * 宿主把 crumbs 按引用存进 Map，这里在候选返回后**就地改 label**，
-		 * 渲染时读到的就是同一份数字，芯片和分组不会再各说各话。
-		 */
-		var LAST_CRUMBS = null;
-
-		function syncCrumbs() {
-			if (!LAST_CRUMBS) return 0;
-			var changed = 0;
-			for (var i = 0; i < LAST_CRUMBS.length; i++) {
-				var c = LAST_CRUMBS[i];
-				if (!c || typeof c.value !== 'string') continue;
-				var next;
-				if (c.value === 'root') {
-					next = '全部 ' + TOTAL;
-				} else if (c.value.indexOf('cat:') === 0) {
-					var id = c.value.slice(4);
-					if (!CATS[id] && !CATCOUNT[id]) continue;
-					next = (CATSHORT[id] || id) + ' ' + (CATCOUNT[id] || 0);
-				} else {
-					continue;
-				}
-				if (c.label !== next) {
-					c.label = next;
-					changed++;
-				}
-			}
-			if (changed) diag.crumbsSynced = (diag.crumbsSynced || 0) + changed;
-			return changed;
-		}
+${runtimeSource("runtime-header.mjs")}
 
 		/** 检索：本地重排后再包成菜单候选项 */
 		function decorateRanked(items) {
@@ -1190,107 +1054,7 @@ ${rankSrc
 		 * 这里直接走它同一条 RPC（ctx.remote.skills.list），自己拿一份新鲜的：
 		 * 变了就是用新的，失败就退回内置缓存（至少菜单还能用）。
 		 */
-		var CTX = null;
-		/** 必须通过 ctx.inject 拿到，否则 Cordis 给的是「一取属性就抛错」的代理 */
-		var REMOTE = null;
-		var FRESH_TTL_MS = 500;
-		var FRESH = { at: 0, sid: '', list: null };
-
-		function serviceOf(ctx, name) {
-			try {
-				if (ctx && typeof ctx.get === 'function') {
-					var v = ctx.get(name);
-					if (v) return v;
-				}
-			} catch (e) {}
-			try {
-				if (ctx && ctx[name]) return ctx[name];
-			} catch (e) {}
-			return null;
-		}
-
-		function noteFresh(ok, n, err) {
-			try {
-				if (typeof localStorage === 'undefined') return;
-				localStorage.setItem(
-					'dsh.skillcat.fresh',
-					JSON.stringify({ at: Date.now(), ok: !!ok, n: n || 0, err: String(err || '').slice(0, 160) })
-				);
-			} catch (e) {}
-		}
-
-		function freshCatalog(ctx, session, signal) {
-			try {
-				var sidv = session && (session.sessionId || session.id);
-				if (!sidv) {
-					noteFresh(false, 0, 'no-session-id');
-					return null;
-				}
-
-				var remote = REMOTE || serviceOf(ctx, 'remote');
-				var sessions = serviceOf(ctx, 'sessions');
-				var api = remote && remote.skills;
-				if (!api || typeof api.list !== 'function') {
-					noteFresh(false, 0, 'no-remote-skills');
-					return null;
-				}
-
-				var now = Date.now();
-				if (FRESH.sid === sidv && FRESH.list && now - FRESH.at < FRESH_TTL_MS) {
-					return Promise.resolve(FRESH.list);
-				}
-
-				function take(r) {
-					if (!r || r.ok !== true || !r.value || !Array.isArray(r.value.skills)) {
-						throw new Error('bad-result:' + (r && r.ok));
-					}
-					return r.value.skills;
-				}
-
-				// 首选：直接打 RPC。内置源之所以套 sessions.using，是为了归属到会话作用域；
-				// 我们只是读目录，能直连就不绕。
-				var direct = Promise.resolve().then(function () {
-					return api.list({ sessionId: sidv }, signal);
-				});
-
-				var scoped = function () {
-					if (!sessions || typeof sessions.using !== 'function') throw new Error('no-sessions');
-					if (typeof sessions.binding === 'function' && sessions.binding(sidv) === undefined) {
-						throw new Error('no-binding');
-					}
-					return sessions.using(sidv, { source: 'skill-categories', signal: signal }, function (ref) {
-						var st = ref.binding.session.getSnapshot();
-						if (st.openState !== 'open') throw new Error('not-open');
-						return api.list({ sessionId: sidv }, signal);
-					});
-				};
-
-				return direct
-					.then(take)
-					.catch(function (e1) {
-						try {
-							return Promise.resolve(scoped()).then(take);
-						} catch (e2) {
-							throw new Error('direct:' + (e1 && e1.message) + ' | scoped:' + (e2 && e2.message));
-						}
-					})
-					.then(function (list) {
-						FRESH = { at: Date.now(), sid: sidv, list: list };
-						diag.freshFetches = (diag.freshFetches || 0) + 1;
-						noteFresh(true, list.length, '');
-						return list;
-					})
-					.catch(function (e) {
-						diag.degraded = 'fresh:' + (e && e.message);
-						noteFresh(false, 0, e && e.message);
-						return null;
-					});
-			} catch (e) {
-				diag.degraded = 'fresh:' + (e && e.message);
-				noteFresh(false, 0, e && e.message);
-				return null;
-			}
-		}
+${runtimeSource("runtime-catalog.mjs")}
 
 		function wrap(src) {
 			if (!src || src[FLAG]) return false;
@@ -1312,6 +1076,15 @@ ${rankSrc
 			src.candidates = function (session, req) {
 				var self = this === undefined ? src : this;
 				var query = req && typeof req.query === 'string' ? req.query : '';
+                var signal = req && req.signal;
+                if (signal && signal.aborted) return Promise.resolve([]);
+                var queryKey = sid(session);
+                var generation = (QUERY_GENERATIONS.get(queryKey) || 0) + 1;
+                QUERY_GENERATIONS.set(queryKey, generation);
+                var lifetime = LIFETIME;
+                function current() {
+                    return lifetime === LIFETIME && QUERY_GENERATIONS.get(queryKey) === generation && !(signal && signal.aborted);
+                }
 
 				// 与宿主保持一致：subagent 会话没有技能目录。
 				// 必须返回 Promise —— 宿主对 candidates 的结果直接 .then()。
@@ -1330,9 +1103,11 @@ ${rankSrc
 				var fullP = Promise.resolve()
 					.then(function () {
 						// 优先自己取一份新鲜目录，绕开内置源的会话级缓存
-						return freshCatalog(CTX, session, req && req.signal);
+						return bounded(freshCatalog(CTX, session), 80, null);
 					})
 					.then(function (list) {
+                        if (!current()) return null;
+                        if (!Array.isArray(list)) list = cachedCatalog(session);
 						// 「取到空目录」是合法结果（技能全被删光），不能当成失败去回退旧缓存 ——
 						// 否则删掉的技能会被内置缓存补回来。
 						if (Array.isArray(list)) {
@@ -1350,10 +1125,10 @@ ${rankSrc
 							return out;
 						}
 						diag.freshFallback = (diag.freshFallback || 0) + 1;
-						return original.call(self, session, { query: '', signal: req && req.signal });
+						return bounded(Promise.resolve().then(function () { return original.call(self, session, { query: '', signal: signal }); }), 120, null);
 					})
 					.catch(function (e) {
-						diag.degraded = 'full:' + (e && e.message);
+						if (current()) diag.degraded = 'full:' + (e && e.message);
 						return null;
 					});
 
@@ -1363,7 +1138,7 @@ ${rankSrc
 								return original.call(self, session, { query: query, signal: req && req.signal });
 							})
 							.catch(function (e) {
-								diag.degraded = 'fuzzy:' + (e && e.message);
+								if (current()) diag.degraded = 'fuzzy:' + (e && e.message);
 								return null;
 							})
 					: Promise.resolve(null);
@@ -1397,7 +1172,8 @@ ${rankSrc
 					});
 				}
 
-				return Promise.all([fullP, looseP]).then(function (res) {
+				return Promise.all([fullP, bounded(looseP, 50, null)]).then(function (res) {
+                    if (!current()) return [];
 					var all = res[0];
 					var loose = res[1];
 
@@ -1411,12 +1187,12 @@ ${rankSrc
 					}
 					if (!all.length) {
 						// 空目录：仍然要让计数/指纹归零，但不启动模型加载
-						ensureCovered(all);
+						ensureCovered(all, session);
 						return all;
 					}
 
 					// 先让新装的技能进入分类体系，后续分组/检索/面包屑都基于它
-					ensureCovered(all);
+					ensureCovered(all, session);
 
 					if (!query) {
 						// 浏览时后台预热向量索引（首次约 26s 下载 + 1s 计算，不阻塞菜单）
@@ -1475,6 +1251,7 @@ ${rankSrc
 							: Promise.resolve(null);
 
 					return semTail.then(function (sem) {
+                        if (!current()) return [];
 						// 合并第二层：语义命中补在最后（只补召回，不改既有顺序）
 						if (sem && sem.length) {
 							var byName = {};
@@ -1611,6 +1388,15 @@ ${rankSrc
 		 * 如果期间已被别的插件再次包装（函数已不是我们装的那一个），就不覆盖它。
 		 */
 		exports.dispose = function () {
+            clearCatalogs();
+            HEADER_VIEWS.clear();
+            SEM.gen++;
+            SEM.status = 'idle';
+            SEM.vectors = null;
+            SEM.error = null;
+            dropPipeline();
+            VECTOR_CACHE.clear();
+            VECTOR_CACHE_LOADED = false;
 			for (var i = 0; i < timers.length; i++) clearInterval(timers[i]);
 			timers.length = 0;
 

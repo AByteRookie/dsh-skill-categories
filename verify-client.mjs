@@ -327,6 +327,8 @@ ok(
 
 console.log('\n[5b2] 模型不可用时必须安静降级');
 
+// dispose now cancels and clears old work; explicitly start a new model load.
+await s2.candidates(sessA, { query: '', signal: {} });
 await new Promise((r) => setTimeout(r, 1200));
 const semState = api.diagnostics.semanticStatus();
 ok(
@@ -776,7 +778,9 @@ console.log('\n[11] 旧任务的初始化失败不得改写新索引状态');
   await sA.candidates({ sessionId: 'SEM-1' }, { query: '', signal: {} });
   await sleep(60);
 
-  // 目录换成 B（旧任务代次过期）
+  // 显式更换 provider：目录刷新本身现在复用同一个初始化任务。
+  api.diagnostics.setSemHooks({ importLib: () => new Promise((resolve, reject) => rejecters.push(reject)) });
+  // 目录换成 B（旧 provider 的任务代次过期）
   const sB = mountWithFresh([], [{ name: 'new-current', description: '新' }]);
   await sB.candidates({ sessionId: 'SEM-2' }, { query: '', signal: {} });
   await sleep(60);
@@ -785,7 +789,8 @@ console.log('\n[11] 旧任务的初始化失败不得改写新索引状态');
   const genBefore = stBefore.gen;
 
   // 让最早的、已过期的初始化失败
-  if (rejecters.length > 0) rejecters[0](new Error('obsolete pipeline initialization failed'));
+  ok(rejecters.length >= 2, '两个不同 provider 的初始化均已启动');
+  if (rejecters.length >= 2) rejecters[0](new Error('obsolete pipeline initialization failed'));
   await sleep(80);
 
   const stAfter = api.diagnostics.semanticStatus();
@@ -818,13 +823,8 @@ console.log('\n[12] 空缓存 + 正常模型输出 → 索引必须真正建起�
     .filter((l) => /^\s*\/\/.*\t{2,}(var|let|const|function|return|if|for|while)\b/.test(l));
   ok(swallowed.length === 0, '发行 bundle 没有「注释吞掉声明」的行', swallowed[0] || '');
 
-  const lines12 = src.split(/\r?\n/);
-  const at12 = lines12.findIndex((l) => l.indexOf('逐条向量化') >= 0);
-  ok(
-    at12 >= 0 && (lines12[at12 + 1] || '').trim() === 'var out = [];',
-    '向量累加器紧跟在该注释的下一行',
-    at12 >= 0 ? String(lines12[at12 + 1] || '').trim() : '找不到注释'
-  );
+  // The runtime moved into its own source file. The real indexing assertions
+  // below catch a missing accumulator without depending on a comment's wording.
 }
 
 {
@@ -852,6 +852,7 @@ console.log('\n[12] 空缓存 + 正常模型输出 → 索引必须真正建起�
   const st = api.diagnostics.semanticStatus();
   ok(st.status === 'ready', '空缓存下索引达到 ready', `${st.status} / ${st.error || ''}`);
   ok(st.indexed === 2, '索引条数等于目录条数', String(st.indexed));
+  ok(JSON.stringify(st.names.slice().sort()) === JSON.stringify(['idx-alpha', 'idx-beta']), '索引包含正确的技能，不只是条数相等');
   ok(st.error === null, '成功时 error 为空', String(st.error));
   ok(vectorized >= 2, '模型确实被调用过', String(vectorized));
 
