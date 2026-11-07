@@ -58,7 +58,7 @@ export const TAXONOMY = [
     glyph: '▤',
     order: 20,
     blurb: '把设计落到代码：组件、令牌、间距、字体、微交互',
-    strongName: [/^refactoring-ui$/, /^ui-styling$/, /^web-typography$/, /^microinteractions$/, /^design-system$/],
+    strongName: [/^refactoring-ui$/, /^ui-styling$/, /^web-typography$/, /^microinteractions$/, /^design-system$/, /^interface-design(-v\d+)?$/],
     rules: [
       { re: /(ui-styling|refactoring-ui|web-typography|microinteraction|design-system)/i, w: 10 },
       { re: /(shadcn|tailwind|design token|设计令牌|组件规范)/i, w: 9 },
