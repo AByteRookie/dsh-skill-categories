@@ -579,6 +579,8 @@ ${rankSrc
 			}
 			TOTAL = total;
 			diag.recounted = (diag.recounted || 0) + 1;
+			// 数字变了就地修已经发给宿主的面包屑，避免「芯片 23 / 分组 24」
+			syncCrumbs();
 		}
 
 		/**
@@ -1045,7 +1047,7 @@ ${rankSrc
 			});
 
 			if (catId) {
-				return [
+				LAST_CRUMBS = [
 					{ label: '全部 ' + TOTAL, value: 'root' },
 					{
 						label: (CATSHORT[catId] || catId) + ' ' + (CATCOUNT[catId] || 0),
@@ -1053,12 +1055,47 @@ ${rankSrc
 						current: true
 					}
 				];
+				return LAST_CRUMBS;
 			}
 			var chips = [];
 			for (var i = 0; i < ids.length; i++) {
 				chips.push({ label: (CATSHORT[ids[i]] || ids[i]) + ' ' + CATCOUNT[ids[i]], value: 'cat:' + ids[i] });
 			}
+			LAST_CRUMBS = chips;
 			return chips;
+		}
+
+		/**
+		 * 宿主是「先算 header、再取 candidates」（input-trigger 的 refreshHeaders 早于 fetchCandidates）。
+		 * 所以装完技能第一次打开菜单时，芯片上的数字还是上一次的，而分组标题已经按新目录算。
+		 * 宿主把 crumbs 按引用存进 Map，这里在候选返回后**就地改 label**，
+		 * 渲染时读到的就是同一份数字，芯片和分组不会再各说各话。
+		 */
+		var LAST_CRUMBS = null;
+
+		function syncCrumbs() {
+			if (!LAST_CRUMBS) return 0;
+			var changed = 0;
+			for (var i = 0; i < LAST_CRUMBS.length; i++) {
+				var c = LAST_CRUMBS[i];
+				if (!c || typeof c.value !== 'string') continue;
+				var next;
+				if (c.value === 'root') {
+					next = '全部 ' + TOTAL;
+				} else if (c.value.indexOf('cat:') === 0) {
+					var id = c.value.slice(4);
+					if (!CATS[id] && !CATCOUNT[id]) continue;
+					next = (CATSHORT[id] || id) + ' ' + (CATCOUNT[id] || 0);
+				} else {
+					continue;
+				}
+				if (c.label !== next) {
+					c.label = next;
+					changed++;
+				}
+			}
+			if (changed) diag.crumbsSynced = (diag.crumbsSynced || 0) + changed;
+			return changed;
 		}
 
 		/** 检索：本地重排后再包成菜单候选项 */

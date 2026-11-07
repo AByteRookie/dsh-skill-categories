@@ -293,6 +293,23 @@ try {
   }
 
   // 空目录：计数与索引归零
+  // 宿主顺序：先 header（芯片）再 candidates（分组）。
+  // 装完技能第一次打开时，芯片不能还挂着旧数字，否则就是「设计 23 / 设计与视觉 · 24」。
+  {
+    catalog = visible.map((s) => ({ name: s.name, description: s.desc }));
+    const crumbsBefore = src.header({ sessionId: 'ORD' }, { query: '', quoted: false, drilled: false });
+    const sumBefore = crumbsBefore.reduce((a, c) => a + Number(String(c.label).split(' ').pop()), 0);
+
+    catalog = [...catalog, { name: 'zz-order-probe', description: '一个用于验证渲染顺序的技能' }];
+    await src.candidates({ sessionId: 'ORD' }, { query: '', signal: {} });
+
+    // 同一批 crumb 对象（宿主按引用保存），读到的数字必须已更新
+    const sumAfter = crumbsBefore.reduce((a, c) => a + Number(String(c.label).split(' ').pop()), 0);
+    ok(sumAfter === catalog.length, '先 header 后 candidates：芯片数字就地同步', `${sumBefore} → ${sumAfter}，目录 ${catalog.length}`);
+    ok(sumAfter > sumBefore, '新增技能后芯片总数变大', `${sumBefore} → ${sumAfter}`);
+  }
+
+  // 空目录：计数与索引归零
   catalog = [];
   const empty = await src.candidates({ sessionId: 'FX2' }, { query: '', signal: {} });
   ok(empty.length === 0, '空目录返回 0 项', String(empty.length));

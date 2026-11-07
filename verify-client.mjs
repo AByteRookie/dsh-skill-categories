@@ -526,7 +526,7 @@ ok(
 
 const adHeader = adSrc.header({}, { query: '', quoted: false, drilled: false });
 const adSum = adHeader.reduce((a, c) => a + Number(String(c.label).split(' ').pop()), 0);
-ok(adSum === 153, `面包屑总数随自适应更新为 148+5=153（实际 ${adSum}）`);
+ok(adSum === SKILLS.length + extra.length, `面包屑总数随自适应更新为 ${SKILLS.length}+${extra.length}（实际 ${adSum}）`);
 ok(
   adHeader.some((c) => String(c.label).includes('zeta')),
   '新分类出现在面包屑芯片里',
@@ -539,7 +539,7 @@ await new Promise((r) => setTimeout(r, 400));
 const backItems = await backSrc.candidates({ id: 'A' }, { query: '', signal: {} });
 const backHeader = backSrc.header({}, { query: '', quoted: false, drilled: false });
 const backSum = backHeader.reduce((a, c) => a + Number(String(c.label).split(' ').pop()), 0);
-ok(backSum === 148, `技能被删掉后总数回落到 148（实际 ${backSum}）`);
+ok(backSum === SKILLS.length, `技能被删掉后总数回落到 ${SKILLS.length}（实际 ${backSum}）`);
 ok(
   !backHeader.some((c) => String(c.label).includes('zeta')),
   '临时分类随技能消失一起撤掉',
