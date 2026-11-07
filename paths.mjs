@@ -167,6 +167,58 @@ export function skillsRoot() {
   return process.env.AGENTS_SKILLS_DIR || join(homedir(), '.agents', 'skills');
 }
 
+/**
+ * 项目根：从 cwd 往上找，直到命中标记文件。
+ * 与 DSH 的 findProjectRoot 同义——它按同样的方式定位 <root>/.dsh/skills。
+ * 找不到就返回 null（表示「这个 cwd 不在任何项目里」），不要退化成 cwd 本身，
+ * 否则每个目录都会被当成项目根、凭空多扫两个不存在的位置。
+ */
+export function projectRootOf(cwd) {
+  if (!cwd) return null;
+  const MARKERS = ['.git', 'package.json', 'pnpm-workspace.yaml', 'AGENTS.md', 'CLAUDE.md', '.dsh'];
+  let dir = cwd;
+  for (let depth = 0; depth < 12; depth++) {
+    for (const m of MARKERS) if (existsSync(join(dir, m))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * 全部技能根，按 DSH 的 rank 优先级排列（先命中者胜）。
+ *
+ * 依据 app.asar 里 @deepseek-ai/dsh-skill-filesystem 的 roots()：
+ *   project-dsh   <projectRoot>/.dsh/skills      rank 0
+ *   project-agents<projectRoot>/.agents/skills   rank 1
+ *   custom        AGENTS_SKILLS_DIR               rank 2
+ *   user-dsh      $DSH_HOME/skills                rank 3
+ *   user-agents   ~/.agents/skills                rank 4
+ *   bundled       app.asar 内的 skills|assets     rank 5（由 bundled.json 提供）
+ *
+ * 老版本只扫了最后一个，于是「项目级技能」「$DSH_HOME/skills」里的技能在菜单里
+ * 根本不存在——用户装完看不到，正是这个缺口。
+ */
+export function skillsRoots(cwd = process.cwd()) {
+  const roots = [];
+  const proj = projectRootOf(cwd);
+  if (proj) {
+    roots.push({ id: 'project-dsh', path: join(proj, '.dsh', 'skills') });
+    roots.push({ id: 'project-agents', path: join(proj, '.agents', 'skills') });
+  }
+  // AGENTS_SKILLS_DIR 是**覆盖**而不是追加：测试与 CI 靠它把用户根换成临时目录，
+  // 如果同时还扫 ~/.agents/skills，固定数据集就会混进真机技能，断言当场漂移。
+  if (process.env.AGENTS_SKILLS_DIR) {
+    roots.push({ id: 'custom', path: process.env.AGENTS_SKILLS_DIR });
+  }
+  roots.push({ id: 'user-dsh', path: join(dshHome(), 'skills') });
+  if (!process.env.AGENTS_SKILLS_DIR) {
+    roots.push({ id: 'user-agents', path: join(homedir(), '.agents', 'skills') });
+  }
+  return roots;
+}
+
 /** 插件安装位置（install 写、DSH 读） */
 export function pluginDir() {
   return join(dshHome(), 'local-plugins', PLUGIN_NAME);

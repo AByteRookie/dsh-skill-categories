@@ -187,11 +187,55 @@ try {
 export function apply(ctx) {
 	note('applied');
 
+	// 取证用：把宿主真实目录的名单写进日志。
+	// 客户端渲染的是「宿主给的目录」，我构建索引时读的是磁盘 —— 两者一旦不一致，
+	// 界面数字就会和我算的不一样。没有这份名单，只能靠猜。
+	// 启动时必写一次（一行）；后续只在手动放了标记文件时写，避免日志膨胀。
+	const dumpMarker = join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'dsh-skillcat-dump');
+	const dumpCatalog = (force) => {
+		if (!force) {
+			try {
+				if (!existsSync(dumpMarker)) return;
+			} catch {
+				return;
+			}
+		}
+		try {
+			const svc = ctx && ctx.skills;
+			if (!svc || typeof svc.list !== 'function') {
+				note('catalog skipped: no skills.list');
+				return;
+			}
+			Promise.resolve(svc.list({})).then((list) => {
+				const names = (Array.isArray(list) ? list : []).map((s) => s && s.name).filter(Boolean);
+				note('catalog ' + names.length + ' :: ' + names.join(','));
+			}).catch((e) => note('catalog error: ' + String((e && e.message) || e)));
+		} catch (e) {
+			note('catalog crash: ' + String((e && e.message) || e));
+		}
+	};
+
+	dumpCatalog(true);
+
 	try {
-		const root =
-			process.env.AGENTS_SKILLS_DIR || join(process.env.AGENTS_HOME || join(homedir(), '.agents'), 'skills');
-		if (!existsSync(root)) {
-			note('watch skipped: ' + root + ' not found');
+		// 技能可能有五个根（DSH 的 dsh-skill-filesystem 就是按这个顺序找的）：
+		// 项目 .dsh/skills、项目 .agents/skills、$DSH_HOME/skills、~/.agents/skills。
+		// 以前只盯最后一个，把技能放进项目里就不会触发刷新。
+		const cand = [
+			join(process.cwd(), '.dsh', 'skills'),
+			join(process.cwd(), '.agents', 'skills'),
+			join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills'),
+			process.env.AGENTS_SKILLS_DIR || join(process.env.AGENTS_HOME || join(homedir(), '.agents'), 'skills'),
+		];
+		const roots = [];
+		for (const r of cand) {
+			if (!r) continue;
+			if (roots.indexOf(r) >= 0) continue;
+			if (!existsSync(r)) continue;
+			roots.push(r);
+		}
+		if (!roots.length) {
+			note('watch skipped: no skill root found');
 			return;
 		}
 
@@ -239,33 +283,38 @@ export function apply(ctx) {
 			if (timer.unref) timer.unref();
 		};
 
-		let watcher;
-		try {
-			watcher = watch(root, { recursive: true }, bump);
-		} catch (e) {
-			note('watch failed: ' + String((e && e.message) || e));
-			return;
+		const watchers = [];
+		for (const root of roots) {
+			let watcher;
+			try {
+				watcher = watch(root, { recursive: true }, bump);
+			} catch (e) {
+				note('watch failed: ' + root + ' ' + String((e && e.message) || e));
+				continue;
+			}
+			// fs.watch 的错误是异步事件，外层 try/catch 接不到；
+			// 不注册的话会成为未捕获异常，把宿主进程带走。
+			if (watcher && typeof watcher.on === 'function') {
+				watcher.on('error', (e) => {
+					note('watch error: ' + root + ' ' + String((e && e.message) || e));
+				});
+				watcher.on('close', () => {
+					note('watch closed: ' + root);
+				});
+			}
+			watchers.push(watcher);
+			note('watching ' + root);
 		}
 
-		// fs.watch 的错误是异步事件，外层 try/catch 接不到；
-		// 不注册的话会成为未捕获异常，把宿主进程带走。
-		if (watcher && typeof watcher.on === 'function') {
-			watcher.on('error', (e) => {
-				note('watch error: ' + String((e && e.message) || e));
-			});
-			watcher.on('close', () => {
-				note('watch closed');
-			});
-		}
-		note('watching ' + root);
-
-		// Cordis effect：插件卸载时关掉 watcher
+		// Cordis effect：插件卸载时关掉所有 watcher
 		if (ctx && typeof ctx.effect === 'function') {
 			try {
 				ctx.effect(() => () => {
-					try {
-						watcher.close();
-					} catch {}
+					for (const w of watchers) {
+						try {
+							w.close();
+						} catch {}
+					}
 					if (timer) clearTimeout(timer);
 				});
 			} catch {}
@@ -281,7 +330,11 @@ export function apply(ctx) {
 /* ---------------------------- 客户端半边 ---------------------------- */
 
 /* 构建标识：清单版本 + 构建时刻，避免所有文件都叫同一个版本号 */
-const PKG_VERSION = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version;
+// BOM 会让 JSON.parse 直接抛 "Unexpected token"，而 Windows 上的编辑器
+// 很容易给 package.json 加 BOM（PowerShell 的 Set-Content -Encoding utf8 就会）。
+// 这里先剥掉，构建不因为一个不可见字符整体失败。
+const readText = (p) => readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
+const PKG_VERSION = JSON.parse(readText(join(HERE, 'package.json'))).version;
 const BUILD_ID = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
 const VERSION = PKG_VERSION + '+' + BUILD_ID;
 
@@ -599,6 +652,8 @@ ${rankSrc
 			diag.recounted = (diag.recounted || 0) + 1;
 			// 数字变了就地修已经发给宿主的面包屑，避免「芯片 23 / 分组 24」
 			syncCrumbs(session);
+			// 把这次真正用的账写进 localStorage，供外部取证（不影响渲染）
+			noteDiag(all);
 		}
 
 		/**

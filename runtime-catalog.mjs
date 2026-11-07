@@ -17,6 +17,38 @@ function noteFresh(ok, n, err) {
   try { window.localStorage.setItem('dsh.skillcat.fresh', JSON.stringify({ at: Date.now(), ok: !!ok, n: n || 0, err: String(err || '').slice(0, 160) })); } catch (e) {}
 }
 
+/**
+ * 现场取证：把「这次渲染真正用的账」写进 localStorage。
+ *
+ * 为什么必须记名字而不只记数字：用户看到 24/9/8/9/… 与我本地 23/9/8/7/… 打架时，
+ * 光比数字只能证明"不一样"，证明不了"哪一条不一样"。把不在 MAP 里的名字列出来，
+ * 就能直接判：是目录多出了新技能（unknown 非空），还是 MAP 与索引不同源（unknown 为空却仍不等）。
+ */
+function noteDiag(all) {
+  try {
+    var unknown = [];
+    var i;
+    for (i = 0; i < all.length; i++) {
+      var nm = all[i] && all[i].name;
+      if (nm && !MAP[nm]) unknown.push(nm);
+    }
+    window.localStorage.setItem(
+      'dsh.skillcat.diag',
+      JSON.stringify({
+        at: Date.now(),
+        version: (typeof diag !== 'undefined' && diag.version) || '',
+        mapN: Object.keys(MAP).length,
+        catN: all.length,
+        unknownN: unknown.length,
+        unknown: unknown.slice(0, 60),
+        counts: JSON.parse(JSON.stringify(CATCOUNT)),
+        total: TOTAL,
+        sem: (typeof SEM !== 'undefined' && SEM && SEM.status) || '',
+      })
+    );
+  } catch (e) {}
+}
+
 function bounded(p, ms, fallback) {
   return new Promise(function (resolve) {
     var done = false;

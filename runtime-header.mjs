@@ -10,6 +10,9 @@ function headerItems(query) {
   var ids = Object.keys(CATCOUNT).filter(function (id) { return CATCOUNT[id] > 0; });
   ids.sort(function (a, b) { return (CATS[a] ? CATS[a].order : 999) - (CATS[b] ? CATS[b].order : 999); });
   var chips = ids.map(function (id) { return { label: (CATSHORT[id] || id) + ' ' + CATCOUNT[id], value: 'cat:' + id }; });
+  // 索引与目录不一致的自证不放在这里：菜单里的数字会被外部脚本（含验收集）
+  // 当成计数累加，多一个芯片就会让「合计」变成 NaN 或双倍。取证走
+  // dsh.skillcat.diag 与宿主日志，界面只显示真实的分类与条数。
   // The host discards empty arrays. Retain a placeholder so an initially empty
   // catalog can populate its first categories during this same menu opening.
   return chips.length ? chips : [{ label: '全部 0', value: 'root', current: true }];

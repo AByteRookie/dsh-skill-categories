@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { skillsRoot } from './paths.mjs';
+import { skillsRoot, skillsRoots } from './paths.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, 'inventory.json');
@@ -142,9 +142,43 @@ function scanUserRoot() {
   return scanRoot(USER_ROOT, 'user', '用户安装');
 }
 
+/**
+ * 按 DSH 的 rank 顺序扫全部技能根，同名先到先得。
+ * 这一层以前只扫 ~/.agents/skills，导致项目级 .dsh/skills、项目级 .agents/skills
+ * 与 $DSH_HOME/skills 里的技能在菜单里完全不存在（装了看不到）。
+ */
+function scanAllRoots() {
+  const roots = skillsRoots(process.cwd());
+  const skills = [];
+  const backups = [];
+  const report = [];
+  const seen = new Set();
+  for (const r of roots) {
+    const got = scanRoot(r.path, 'user', `用户安装 · ${r.id}`);
+    let kept = 0;
+    for (const s of got.skills) {
+      if (seen.has(s.name)) continue;
+      seen.add(s.name);
+      skills.push({ ...s, root: r.id, rootPath: r.path });
+      kept++;
+    }
+    backups.push(...got.backups);
+    report.push({
+      id: r.id,
+      path: r.path,
+      exists: !got.missing,
+      found: got.skills.length,
+      kept,
+      shadowed: got.skills.length - kept,
+      backups: got.backups.length,
+    });
+  }
+  return { skills, backups, report, missing: report.length > 0 && !report.some((r) => r.exists) };
+}
+
 /* ---------------------------- 主流程 ---------------------------- */
 
-const user = scanUserRoot();
+const user = scanAllRoots();
 
 /** 实验样本根：SKILLCAT_EXTRA_ROOTS="a;b" —— 只用于验证，不写进用户目录 */
 const extraRoots = (process.env.SKILLCAT_EXTRA_ROOTS || '')
@@ -200,7 +234,18 @@ writeFileSync(
     {
       generatedAt: new Date().toISOString(),
       roots: [
-        { id: 'user', label: '用户安装', path: USER_ROOT, writable: true, scanned: 'live' },
+        ...user.report.map((r) => ({
+          id: r.id,
+          label: `用户安装 · ${r.id}`,
+          path: r.path,
+          writable: true,
+          scanned: 'live',
+          exists: r.exists,
+          found: r.found,
+          kept: r.kept,
+          shadowed: r.shadowed,
+          backups: r.backups,
+        })),
         {
           id: 'bundled',
           label: '产品内置',
@@ -232,4 +277,9 @@ console.log(
     deduped.filter((s) => s.source === 'bundled').length
   }），可见 ${deduped.filter((s) => s.userInvocable).length}，备份排除 ${user.backups.length}`
 );
-if (user.missing) console.log(`⚠ 用户技能根不存在：${USER_ROOT}`);
+for (const r of user.report) {
+  const state = r.exists ? `${r.found} 个` : '不存在';
+  const shadow = r.shadowed ? `，同名让位 ${r.shadowed}` : '';
+  console.log(`  根 ${r.id.padEnd(15)} ${state}${shadow}  ${r.path}`);
+}
+if (user.missing) console.log(`⚠ 没有任何用户技能根存在`);
