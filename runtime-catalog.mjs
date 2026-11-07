@@ -27,10 +27,13 @@ function noteFresh(ok, n, err) {
 function noteDiag(all) {
   try {
     var unknown = [];
+    var names = [];
     var i;
     for (i = 0; i < all.length; i++) {
       var nm = all[i] && all[i].name;
-      if (nm && !MAP[nm]) unknown.push(nm);
+      if (!nm) continue;
+      names.push(nm);
+      if (!MAP[nm]) unknown.push(nm);
     }
     window.localStorage.setItem(
       'dsh.skillcat.diag',
@@ -41,8 +44,11 @@ function noteDiag(all) {
         catN: all.length,
         unknownN: unknown.length,
         unknown: unknown.slice(0, 60),
+        // 全量名单：宿主报的条数与磁盘对不上时，靠它逐条 diff 出多/少的那几个
+        names: names.slice(0, 400),
         counts: JSON.parse(JSON.stringify(CATCOUNT)),
         total: TOTAL,
+        pinned: (typeof PINS !== 'undefined' && PINS) ? Object.keys(PINS).length : 0,
         sem: (typeof SEM !== 'undefined' && SEM && SEM.status) || '',
       })
     );

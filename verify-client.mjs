@@ -555,6 +555,45 @@ ok(
   '被删的技能不再出现在菜单里'
 );
 
+/* --------------------- 测试 6b：菜单数字 == 索引分布 --------------------- */
+
+// 同一份 bundle 必须对同一份目录算出与 index.json 完全相同的分类计数。
+// 这条是「屏幕上看到的」与「构建时算的」之间的唯一契约：
+// 只要它绿，就不可能出现 156 / 设计 25 这种既不是索引也不是目录的数字。
+console.log('\n[6b] 菜单数字 == 索引分布（运行时现算，不读烘焙结果）');
+
+const distSrc = mount(SKILLS);
+await new Promise((r) => setTimeout(r, 400));
+await distSrc.candidates({ id: 'DIST' }, { query: '', signal: {} });
+const distHeader = distSrc.header({}, { query: '', quoted: false, drilled: false });
+
+// 只统计当前目录里的（SKILLS 是可见的 150 条），隐藏技能不在目录里
+const shortOf = (catId) => {
+  const t = idx.taxonomy.find((x) => x.id === catId);
+  return t ? String(t.label).split('与')[0] : '未归';
+};
+const catOf = new Map(idx.skills.map((s) => [s.name, s.category]));
+const expectedDist = {};
+for (const s of SKILLS) {
+  const short = shortOf(catOf.get(s.name));
+  expectedDist[short] = (expectedDist[short] || 0) + 1;
+}
+const actualDist = {};
+for (const c of distHeader) {
+  const label = String(c.label);
+  const cut = label.lastIndexOf(' ');
+  actualDist[label.slice(0, cut)] = Number(label.slice(cut + 1));
+}
+
+const distKeys = new Set([...Object.keys(expectedDist), ...Object.keys(actualDist)]);
+const distDiff = [...distKeys].filter((k) => (expectedDist[k] || 0) !== (actualDist[k] || 0));
+ok(distDiff.length === 0, '每个芯片的数字都等于索引里该类条数', distDiff.map((k) => `${k}: 索引 ${expectedDist[k] || 0} / 菜单 ${actualDist[k] || 0}`).join(' | '));
+
+const distSum = Object.values(actualDist).reduce((a, b) => a + b, 0);
+ok(distSum === SKILLS.length, `芯片之和等于目录条数 ${SKILLS.length}（实际 ${distSum}）`);
+ok(api.diagnostics.pinned === 0, '没有任何技能靠钉死分类（全部走规则现算）', String(api.diagnostics.pinned));
+ok(api.diagnostics.classified === SKILLS.length, `本轮把 ${SKILLS.length} 条全部重算过（实际 ${api.diagnostics.classified}）`);
+
 /* ---------------------------- 测试 8：绕过会话级缓存 ---------------------------- */
 
 console.log('\n[8] 会话级缓存绕过（内置源只取一次目录）');

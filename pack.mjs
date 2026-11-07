@@ -60,6 +60,18 @@ for (const s of idx.skills) {
 
 const stats = { skills: Object.keys(map).length, groups: idx.taxonomy.length };
 
+/**
+ * 只有「规则算不出来」的分类才允许钉死：人工覆盖（source=manual）与名字族（dyn-*）。
+ * 其余技能一律不烘结果 —— 客户端每次都拿当前目录现算，
+ * 这样装/删技能立刻改变分类和计数，不需要重建、不需要重启。
+ */
+const pins = {};
+for (const s of idx.skills) {
+  const manual = s.source === 'manual';
+  const family = String(s.category || '').startsWith('dyn-');
+  if (manual || family) pins[s.name] = s.category;
+}
+
 /** 分类的纯名字（去掉字形前缀），用于「输入分类名直接筛选」 */
 const catName = {};
 for (const t of idx.taxonomy) catName[t.id] = t.label;
@@ -143,6 +155,52 @@ const ruleScore = { min: MIN_SCORE, boost: NAME_BOOST, strong: STRONG_NAME_BONUS
  */
 const facetToDisplay = {};
 for (const [facet, display] of FACET_TO_DISPLAY.entries()) facetToDisplay[facet] = display;
+
+/* ------------------- 发货前自证：运行期规则必须复现索引 ------------------- */
+
+const parseResrc = (src) => {
+  const s = String(src);
+  if (s.length > 2 && s.charAt(0) === '/') {
+    const end = s.lastIndexOf('/');
+    return new RegExp(s.slice(1, end), s.slice(end + 1));
+  }
+  return new RegExp(s);
+};
+
+const classifyWithRules = (name, desc) => {
+  const hayName = String(name).replace(/-/g, ' ');
+  const text = String(desc || '');
+  let bestId = null;
+  let bestScore = 0;
+  for (const cat of ruleTable) {
+    let score = 0;
+    for (const src of cat.strong) if (parseResrc(src).test(name)) score += ruleScore.strong;
+    for (const pat of cat.rules) {
+      const re = parseResrc(pat[0]);
+      if (re.test(text)) score += pat[1];
+      if (re.test(hayName)) score += pat[1] * ruleScore.boost;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = cat.id;
+    }
+  }
+  return bestScore >= ruleScore.min ? bestId : null;
+};
+
+const drift = [];
+for (const s of idx.skills) {
+  if (pins[s.name]) continue;
+  const facet = classifyWithRules(s.name, s.desc || '');
+  const want = facet ? facetToDisplay[facet] || facet : 'misc';
+  if (want !== s.category) drift.push(`${s.name}: 索引=${s.category} 运行期=${want}`);
+}
+if (drift.length) {
+  console.error(`✗ 运行期规则与索引不一致（${drift.length} 条）——装上以后数字会跳变：`);
+  for (const d of drift.slice(0, 12)) console.error('   ' + d);
+  console.error('   修法：调 taxonomy.mjs 规则，或把该技能登记成 pins（人工覆盖）。');
+  process.exit(1);
+}
 
 /* ---------------------------- 宿主半边 ---------------------------- */
 
@@ -373,6 +431,7 @@ window.__ModuleLoader__.load({
 		var CATCOUNT = ${JSON.stringify(catCount)};
 		var TOTAL = ${JSON.stringify(total)};
 		var MAP = ${JSON.stringify(map)};
+		var PINS = ${JSON.stringify(pins)};
 		var SHORT = ${JSON.stringify(short)};
 		var SAFETY = ${JSON.stringify(safety)};
 		var ALIASES = ${JSON.stringify(aliases)};
@@ -448,174 +507,123 @@ ${rankSrc
 		/** 同名前缀达到这个数就当成一个生态，整体成组（不再逐条分类） */
 		var FAMILY_MIN = 5;
 
-		/** 已由名字族升格为临时分类的技能（避免重复分类） */
+		/** 本轮名字族征用到的技能（调试/图例用） */
 		var DYN = {};
 		var COVERED = {};
-		/** 运行时才纳入的技能（不是烘焙进来的）——只有这些允许被回撤计数 */
-		var AUTO = {};
 
-		/**
-		 * 目录里消失的技能要撤掉计数，否则删完技能菜单数字还挂着旧值。
-		 * 只回撤运行时纳入的（AUTO）：烘焙数据由构建负责，误判代价更大。
-		 */
-		function reconcile(all) {
-			var present = {};
-			for (var i = 0; i < all.length; i++) {
-				var it = all[i];
-				if (it && typeof it.name === 'string') present[it.name] = 1;
-			}
-			for (var nm in AUTO) {
-				if (!Object.prototype.hasOwnProperty.call(AUTO, nm)) continue;
-				if (present[nm]) continue;
-				var cat = MAP[nm];
-				if (cat && CATCOUNT[cat] > 0) CATCOUNT[cat]--;
-				TOTAL--;
-				delete MAP[nm];
-				delete COVERED[nm];
-				delete DYN[nm];
-				delete AUTO[nm];
-				diag.autoRemoved = (diag.autoRemoved || 0) + 1;
+		/** 单个技能 → 展示类；规则算不出来时返回 null（落未归类） */
+		function catOfName(name, desc) {
+			var pin = PINS[name];
+			if (pin) return CATS[pin] ? pin : null;
+			var facet = classifyRuntime(name, desc || '');
+			if (!facet) return null;
+			var cat = F2D[facet] || facet;
+			return CATS[cat] ? cat : null;
+		}
+
+		/** 名字族临时分类（dyn-*）没有成员了就删掉，免得芯片残留 */
+		function pruneDyn(counts) {
+			for (var id in CATS) {
+				if (!Object.prototype.hasOwnProperty.call(CATS, id)) continue;
+				if (id.indexOf('dyn-') !== 0) continue;
+				if (counts[id]) continue;
+				delete CATS[id];
+				delete CATNAME[id];
+				delete CATSHORT[id];
+				delete CATCOUNT[id];
 			}
 		}
 
 		/**
-		 * 把本轮目录里还没见过的技能纳入分类体系。
-		 * 幂等：同一批名字只处理一次。
+		 * 用**当前目录**重建整套账：MAP / CATCOUNT / TOTAL。
 		 *
-		 * 计数口径：TOTAL 统计「所有见过的可见技能」，CATCOUNT 只统计已归类的。
-		 * 所以落进未归类的也要进 CATCOUNT.misc，否则面包屑总数和芯片之和会对不上。
+		 * 这是唯一的真源：不再「构建期烘一批 + 运行时补差额」。
+		 * 旧增量逻辑会留下历史包袱——烘焙进来的删不掉、运行时补进来的
+		 * 又只在 AUTO 里记过名，于是屏幕上出现过 156/设计 25 这种
+		 * 既不是索引、也不是目录的数字。现在每次目录变化都从零算一遍，
+		 * 装/删/改名立刻正确，不需要重建 bundle、不需要重启。
 		 */
-		function ensureCovered(all, session) {
-			// 空目录同样要协调：计数归零、指纹更新、索引作废。
-			// 之前这里直接 return，导致删光技能后 header 还显示旧数量。
+		function syncCatalog(all, session) {
+			// 空目录同样要算：计数归零、面包屑清空
 			if (!all) return;
 
-			// 先撤掉目录里已经消失的，再加新来的 —— 装/删都能当场反映
-			reconcile(all);
-
-			var pending = [];
 			var i;
-
-			if (CATCOUNT.misc === undefined) {
-				CATCOUNT.misc = 0;
-				CATNAME.misc = '未归类';
-				CATSHORT.misc = '未归';
+			var nextMap = {};
+			var counts = {};
+			for (var id in CATS) {
+				if (Object.prototype.hasOwnProperty.call(CATS, id)) counts[id] = 0;
 			}
+			if (!CATS.misc) CATS.misc = { order: 999, label: '· 未归类' };
+			if (!CATNAME.misc) CATNAME.misc = '未归类';
+			if (!CATSHORT.misc) CATSHORT.misc = '未归';
+			counts.misc = 0;
 
-			// ── 生态族优先 ──
-			// 一整套引擎/平台技能（godot-* / roblox-* / unreal-*）往往共享前缀。
-			// 它们各自的描述里满是 script / build / debug / test 这类通用词，
-			// 逐条分类会被打散进「工程」「评审」——用户看到的是一堆碎片而不是一个生态。
-			// 所以先按前缀把 ≥FAMILY_MIN 的未知族整体钉成一组，再处理剩下的。
-			var known = {};
-			for (i = 0; i < all.length; i++) {
-				var k = all[i];
-				if (!k || typeof k.name !== 'string') continue;
-				// 已经归过类的一律不算「未知族」——否则 web-clone / web-typography
-				// 这些老技能会被新装的 web-* 凑成一族，把成熟分类拆掉。
-				if (MAP[k.name]) continue;
-				if (COVERED[k.name]) continue;
-				var pre = String(k.name).split('-')[0] || '';
-				if (pre.length < 3) continue;
-				(known[pre] = known[pre] || []).push(k);
-			}
-
-			var pinned = {};
-			// 阈值随库大小自适应：技能库小的时候（<60）5 个同族已经很显眼，
-			// 用 5 会把 6 个 unity-* 拆成「3 个成组 + 3 个散进别的类」。
-			var famMin = all.length < 60 ? 3 : FAMILY_MIN;
-			for (var p in known) {
-				if (!Object.prototype.hasOwnProperty.call(known, p)) continue;
-				if (known[p].length < famMin) continue;
-				var fid = 'dyn-' + p.toLowerCase().replace(/[^a-z0-9]+/g, '');
-				if (!CATS[fid]) {
-					CATS[fid] = { order: 900 + Object.keys(CATS).length, label: '✦ ' + p };
-					CATNAME[fid] = p;
-					CATSHORT[fid] = p;
-					CATCOUNT[fid] = 0;
-					diag.autoGroups = (diag.autoGroups || 0) + 1;
-				}
-				for (i = 0; i < known[p].length; i++) {
-					pinned[known[p][i].name] = fid;
-				}
-			}
-
+			// ── 1. 逐条判定（索引外的技能走同一套规则）──
+			var pool = [];
+			var total = 0;
 			for (i = 0; i < all.length; i++) {
 				var it = all[i];
 				if (!it || typeof it.name !== 'string') continue;
-				if (COVERED[it.name]) continue;
-				if (MAP[it.name] && MAP[it.name] !== 'misc') {
-					COVERED[it.name] = 1;
-					continue;
-				}
-
-				COVERED[it.name] = 1;
-				TOTAL++;
-
-				// 生态族成员直接归族，不再逐条分类
-				if (pinned[it.name]) {
-					MAP[it.name] = pinned[it.name];
-					AUTO[it.name] = 1;
-					CATCOUNT[pinned[it.name]]++;
-					diag.familyPinned = (diag.familyPinned || 0) + 1;
-					continue;
-				}
-
-				var facet = classifyRuntime(it.name, it.description || '');
-				var cat = facet ? F2D[facet] || facet : null;
-
-				if (cat && CATS[cat]) {
-					MAP[it.name] = cat;
-					AUTO[it.name] = 1;
-					CATCOUNT[cat] = (CATCOUNT[cat] || 0) + 1;
-					diag.autoClassified = (diag.autoClassified || 0) + 1;
+				total++;
+				var cat = catOfName(it.name, it.description || it.desc || '');
+				if (cat) {
+					nextMap[it.name] = cat;
+					counts[cat] = (counts[cat] || 0) + 1;
 				} else {
-					MAP[it.name] = 'misc';
-					AUTO[it.name] = 1;
-					CATCOUNT.misc++;
-					pending.push(it);
+					nextMap[it.name] = 'misc';
+					counts.misc++;
+					pool.push(it);
 				}
 			}
 
-			// 名字族：从**当前整个未归类池**里找同前缀 ≥3 的。
-			// 只看本轮新增会导致「一次装 3 个」能成组、「分三次各装 1 个」永远留在未归类。
-			var pool = [];
-			for (i = 0; i < all.length; i++) {
-				var pi = all[i];
-				if (!pi || typeof pi.name !== 'string') continue;
-				if (MAP[pi.name] === 'misc') pool.push(pi);
-			}
-
+			// ── 2. 名字族：未归类的按前缀聚，够数就整族成一个临时类 ──
+			// 未归类池里的同前缀成员：3 个就该成族（用户一次装 3 个同类是最常见的情形）。
+			var famMin = 3;
 			var fam = {};
 			for (i = 0; i < pool.length; i++) {
-				var f = String(pool[i].name).split('-')[0] || 'other';
-				(fam[f] = fam[f] || []).push(pool[i]);
+				var pre = String(pool[i].name).split('-')[0] || '';
+				if (pre.length < 3) continue;
+				(fam[pre] = fam[pre] || []).push(pool[i]);
 			}
+			DYN = {};
 			for (var key in fam) {
 				if (!Object.prototype.hasOwnProperty.call(fam, key)) continue;
-				// 已经有同名动态分类的话，后来者也要并进去
-				var existingId = 'dyn-' + String(key).toLowerCase().replace(/[^a-z0-9]+/g, '');
-				if (fam[key].length < 3 && !CATS[existingId]) continue;
-
-				var id = existingId;
-				if (!CATS[id]) {
-					CATS[id] = { order: 900 + Object.keys(CATS).length, label: '✦ ' + key };
-					CATNAME[id] = key;
-					CATSHORT[id] = key;
-					CATCOUNT[id] = 0;
+				var members = fam[key];
+				if (members.length < famMin) continue;
+				var fid = 'dyn-' + String(key).toLowerCase().replace(/[^a-z0-9]+/g, '');
+				if (!CATS[fid]) {
+					CATS[fid] = { order: 900 + Object.keys(CATS).length, label: '✦ ' + key };
+					CATNAME[fid] = key;
+					CATSHORT[fid] = key;
 					diag.autoGroups = (diag.autoGroups || 0) + 1;
 				}
-				for (i = 0; i < fam[key].length; i++) {
-					var nm = fam[key][i].name;
-					DYN[nm] = id;
-					MAP[nm] = id;
-					AUTO[nm] = 1;
+				counts[fid] = 0;
+				for (i = 0; i < members.length; i++) {
+					nextMap[members[i].name] = fid;
+					DYN[members[i].name] = fid;
+					counts[fid]++;
+					counts.misc--;
 				}
 			}
 
-			// 计数一律从「当前目录」重算：不再保留构建时常量，
-			// 否则目录里删掉一个打包时就有的技能，数字纹丝不动。
-			recount(all, session);
+			// ── 3. 落账 ──
+			pruneDyn(counts);
+			MAP = nextMap;
+			for (var c2 in counts) {
+				if (Object.prototype.hasOwnProperty.call(counts, c2)) CATCOUNT[c2] = counts[c2];
+			}
+			TOTAL = total;
+			COVERED = {};
+			for (var nm in MAP) {
+				if (Object.prototype.hasOwnProperty.call(MAP, nm)) COVERED[nm] = 1;
+			}
+			diag.recounted = (diag.recounted || 0) + 1;
+			diag.classified = total;
+			diag.pinned = Object.keys(PINS).length;
+			// 数字变了就地修已经发给宿主的面包屑，避免「芯片 23 / 分组 24」
+			syncCrumbs(session);
+			// 把这次真正用的账写进 localStorage，供外部取证（不影响渲染）
+			noteDiag(all);
 
 			// 索引跟随目录：内容一变就作废，下次浏览时重建
 			var fp = catalogFingerprint(all);
@@ -631,29 +639,6 @@ ${rankSrc
 				}
 				SEM.fp = fp;
 			}
-		}
-
-		/** 按当前可见目录重算每个分类的数量与总数 */
-		function recount(all, session) {
-			var cat;
-			for (cat in CATCOUNT) {
-				if (Object.prototype.hasOwnProperty.call(CATCOUNT, cat)) CATCOUNT[cat] = 0;
-			}
-			var total = 0;
-			for (var i = 0; i < all.length; i++) {
-				var nm = all[i] && all[i].name;
-				if (!nm) continue;
-				total++;
-				var c = MAP[nm];
-				if (c && CATS[c]) CATCOUNT[c] = (CATCOUNT[c] || 0) + 1;
-				else CATCOUNT.misc = (CATCOUNT.misc || 0) + 1;
-			}
-			TOTAL = total;
-			diag.recounted = (diag.recounted || 0) + 1;
-			// 数字变了就地修已经发给宿主的面包屑，避免「芯片 23 / 分组 24」
-			syncCrumbs(session);
-			// 把这次真正用的账写进 localStorage，供外部取证（不影响渲染）
-			noteDiag(all);
 		}
 
 		/**
@@ -1338,12 +1323,12 @@ ${runtimeSource("runtime-catalog.mjs")}
 					}
 					if (!all.length) {
 						// 空目录：仍然要让计数/指纹归零，但不启动模型加载
-						ensureCovered(all, session);
+						syncCatalog(all, session);
 						return all;
 					}
 
 					// 先让新装的技能进入分类体系，后续分组/检索/面包屑都基于它
-					ensureCovered(all, session);
+					syncCatalog(all, session);
 
 					if (!query) {
 						// 以前在这里直接 semLoad：菜单一打开就去 import CDN 上的 transformers
