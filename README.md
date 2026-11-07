@@ -259,6 +259,36 @@ career 求职与职业   review 评审         tools 工具集成
 
 ## 修复记录
 
+### 1.0.12 — 芯片数字与分组对齐
+
+用户截图：顶部芯片 `设计 23`，正文分组头却是 `设计与视觉 · 24`——刚装的技能没反映在芯片上。
+
+根因是宿主的调用顺序。`ui-input-trigger` 里 **先算芯片、再取候选**：
+
+```js
+this.refreshHeaders(hit, roster);   // header()      ← 用上一次的计数
+this.fetchCandidates(hit, roster);  // candidates()  ← 这时才重新计数
+```
+
+所以装完技能第一次打开菜单，芯片还挂着旧数字，而分组已经按新目录算过了。
+
+宿主把 crumbs 按引用存进 Map、渲染时才读 `crumb.label`，因此在候选返回后**就地改 label** 即可对齐：
+
+```js
+function syncCrumbs() { /* 按最新 CATCOUNT / TOTAL 重写 label，不重建对象 */ }
+// recount() 末尾调用
+```
+
+固定数据集新增 2 条断言（先 header 后 candidates 仍要一致），去掉修复会红：
+`24 → 24，目录 25`。
+
+顺带把 `verify-client` 里两处写死的 148 改成从索引推导——本机技能库已变成 149。
+
+### 1.0.11 — README 界面示意图
+
+`docs/make-shots.mjs` 用真实索引与真实 bundle 输出渲染两张图（分组菜单 / 中文查询），
+Edge headless 截图。图中数据是真的，但**不是窗口截图**——DSH 桌面版没有暴露调试端口。
+
 ### 1.0.10 — 让异步用例「真的注入故障」
 
 v1.0.9 复测 78/78 通过，指出异步用例缺前置断言：故障注入包在 `if (rejecters.length)` 里，
