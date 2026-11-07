@@ -6,19 +6,21 @@
 
 [![verify](https://github.com/AByteRookie/dsh-skill-categories/actions/workflows/verify.yml/badge.svg)](https://github.com/AByteRookie/dsh-skill-categories/actions/workflows/verify.yml)
 
-## 效果
+## 效果（示意图，非截图）
 
-装好之后，`/` 一打开就是这个样子——148 个技能按 10 个分类分组，顶部是可点的面包屑，每个分类带数量：
+装好之后，`/` 一打开的**内容和分组逻辑**是这样的：技能按分类聚集，顶部是可点的面包屑，每个分类带数量。
+
+> **先说清楚**：下面两张是渲染出来的示意图，不是 DSH 的界面截图。DSH 桌面版没有暴露调试端口，
+> 我无法直接抓真实窗口。图里的技能名、描述、分组、计数、排序都来自真实的 `index.json` 与 bundle 的
+> `candidates()` 返回值（`node docs/make-shots.mjs` 可复现），但**样式和布局是这张图自己的 CSS**。
+> 真实界面里芯片之间是 `>` 分隔、列表更紧凑——以你屏幕上看到的为准。
+> 两边应该一致的是**数字**：`Σ 各类 == TOTAL == 列表行数`，这条由 `verify-consistency.mjs` 守着。
 
 ![空查询：按分类分组的菜单](docs/menu-empty.png)
 
 中文直接搜，不用记 kebab-case 英文名。输入「做落地页」命中 `landing-page-design-hard-rules`：
 
 ![中文查询：输入「做落地页」的首项命中](docs/menu-query.png)
-
-> 这两张图由 [`docs/make-shots.mjs`](docs/make-shots.mjs) 用**真实索引和真实 bundle 输出**渲染（`node docs/make-shots.mjs` 可复现），
-> 不是截图——DSH 桌面版没有暴露调试端口。图中的技能名、描述、分组、计数都来自 `index.json` 与 bundle 的 `candidates()` 返回值，
-> 但它不等同于「在你屏幕上看到的像素」。真实的界面验收尚未做过，见 [兼容性与已知限制](#兼容性与已知限制)。
 
 ## 安装
 
